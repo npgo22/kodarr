@@ -34,11 +34,19 @@ def postgres():
          "-p", f"127.0.0.1:{PG_PORT}:5432", "postgres:18-alpine"],
         check=True, capture_output=True,
     )
-    for _ in range(50):
-        r = subprocess.run(["docker", "exec", "kodarr-it-pg", "pg_isready", "-U", "postgres"], capture_output=True)
-        if r.returncode == 0:
+    # pg_isready inside the container passes during the throwaway initdb server;
+    # only a successful host connection proves the real server is up.
+    async def _connect_ok() -> bool:
+        try:
+            await (await db.connect(DSN)).close()
+            return True
+        except Exception:
+            return False
+
+    for _ in range(60):
+        if asyncio.run(_connect_ok()):
             break
-        time.sleep(0.3)
+        time.sleep(0.5)
     else:
         pytest.fail("postgres container never became ready")
     yield DSN
@@ -215,8 +223,8 @@ def test_stale_grab_expiry(postgres, tmp_path):
     asyncio.run(main())
 
 
-def test_jellyseerr_request_webhook(postgres, tmp_path):
-    """Jellyseerr approval -> tvdb->anilist mapping -> add all season entries -> immediate processing."""
+def test_seerr_request_webhook(postgres, tmp_path):
+    """Seerr approval -> tvdb->anilist mapping -> add all season entries -> immediate processing."""
     from aiohttp.test_utils import TestClient, TestServer
     from seadex import EntryNotFoundError
 
@@ -250,9 +258,9 @@ def test_jellyseerr_request_webhook(postgres, tmp_path):
             "subject": "Frieren: Beyond Journey's End",
             "media": {"media_type": "tv", "tvdbId": "424536", "tmdbId": "209867"},
         }
-        r = await client.post("/webhook/jellyseerr", json=payload)  # no token -> 401
+        r = await client.post("/webhook/seerr", json=payload)  # no token -> 401
         assert r.status == 401
-        r = await client.post("/webhook/jellyseerr", json=payload, headers={"Authorization": "tok"})
+        r = await client.post("/webhook/seerr", json=payload, headers={"Authorization": "tok"})
         assert r.status == 200 and (await r.json())["added"] == [154587, 182255]
 
         rows = await (await conn.execute("SELECT anilist_id, title, root_path FROM series ORDER BY anilist_id")).fetchall()

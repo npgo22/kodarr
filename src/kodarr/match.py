@@ -52,21 +52,27 @@ class ParsedRelease:
     season: int | None = None  # release-named cour ("S4", "4th Season"); None if absent
 
 
+def _collapse(value) -> int | None:
+    """anitopy returns a list when a number appears twice in the name
+    ("S04E10 ... 4th Season" -> ['4', '04']). Same value repeated is that
+    value; genuinely different values (a batch range) is no single value."""
+    if isinstance(value, list):
+        ints = {int(v) for v in value if str(v).isdigit()}
+        return ints.pop() if len(ints) == 1 else None
+    return int(value) if value is not None and str(value).isdigit() else None
+
+
 def parse(release_name: str) -> ParsedRelease | None:
     parsed = anitopy.parse(release_name)
     if not parsed or "anime_title" not in parsed:
         return None
-    ep = parsed.get("episode_number")
-    if isinstance(ep, list):  # batch ranges like ['01','12'] — not a single episode
-        ep = None
-    season = parsed.get("anime_season")
-    if isinstance(season, list):  # multi-season batch — no single cour
-        season = None
+    # drop embedded alt-titles: "Title (English Title)" -> "Title"
+    title = " ".join(re.sub(r"\([^)]*\)", " ", parsed["anime_title"]).split())
     return ParsedRelease(
-        title=parsed["anime_title"],
+        title=title or parsed["anime_title"],
         group=parsed.get("release_group"),
-        episode=int(ep) if ep is not None else None,
-        season=int(season) if season is not None and str(season).isdigit() else None,
+        episode=_collapse(parsed.get("episode_number")),
+        season=_collapse(parsed.get("anime_season")),
     )
 
 
@@ -84,10 +90,14 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
     that number absolutely across cours still map to the right entry.
     """
     want = normalize(parsed.title)
+    wants = {want}
+    if parsed.season is not None and want.endswith(f" {parsed.season}"):
+        # "Title 4 - S04E13": trailing digit restates the season
+        wants.add(want.removesuffix(f" {parsed.season}").strip())
     for row in series_rows:
         names = {normalize(n) for n in [row["title"], *row["synonyms"]]}
         base_names = names | {_strip_season(n) for n in names}
-        if want not in base_names:
+        if not (wants & base_names):
             continue
         if parsed.season is not None and parsed.season != _entry_season(names):
             continue  # release names a different cour than this entry
@@ -96,8 +106,9 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
             # a season-tagged release ("S2 - 04") numbers per cour already;
             # episode_offset only translates absolute numbering
             ep = parsed.episode if parsed.season is not None else parsed.episode - row["episode_offset"]
-            total = row.get("episodes")
-            if ep < 1 or (total and ep > total):
+            # while airing, episodes is NULL on AniList — cap at aired+1
+            total = row.get("episodes") or (row.get("aired") or 0) + 1
+            if ep < 1 or ep > total:
                 continue  # right title, wrong entry (e.g. sequel cour)
         return row, ep
     return None

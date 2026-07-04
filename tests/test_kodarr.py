@@ -73,6 +73,49 @@ def test_digit_title_not_read_as_season():
     assert m and m[0]["anilist_id"] == 116589 and m[1] == 3
 
 
+SLIME = [  # real AniList entries (2026-07); the show sonarr-anime misrouted
+    {"anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},
+    {"anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season", "TenSura 2"]},
+    {"anilist_id": 156822, "title": "That Time I Got Reincarnated as a Slime Season 3", "episodes": 24, "aired": 24, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 3rd Season", "Tensura 3"]},
+    {"anilist_id": 182205, "title": "That Time I Got Reincarnated as a Slime Season 4", "episodes": None, "aired": 13, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 4th Season", "Tensura 4"]},
+]
+
+
+def test_slime_real_release_forms():
+    """Real Nyaa titles for Slime S4 (the show sonarr fetched wrong). Every
+    group's naming form must land on the S4 entry, never S1."""
+    cases = [
+        ("[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 13 (1080p) [C3528385].mkv", 13),
+        ("[Erai-raws] Tensei Shitara Slime Datta Ken 4th Season - 13 [1080p CR WEBRip HEVC AAC][MultiSub]", 13),
+        ("[ASW] Tensei Shitara Slime Datta Ken S4 - 13 [1080p HEVC x265 10Bit][AAC]", 13),
+        ("[DKB] Tensei shitara Slime Datta Ken - S04E13 [1080p][HEVC x265 10bit][Multi-Subs][weekly]", 13),
+        # parenthesized alt-title
+        ("[Judas] Tensei Shitara Slime Datta Ken (That Time I Got Reincarnated as a Slime) - S04E13 [1080p]", 13),
+        # scene form: anitopy returns anime_season as ['4','04'] — must collapse, not drop
+        ("That Time I Got Reincarnated as a Slime S04E10 The Master of Greed 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", 10),
+        ("[Yameii] That Time I Got Reincarnated as a Slime - S04E10 [English Dub] [CR WEB-DL 1080p H264 AAC] (Tensei Shitara Slime Datta Ken Season 4 | S4)", 10),
+        # trailing season digit in title
+        ("[Ironclad] Tensei Shitara Slime Datta Ken 4 - S04E13 [WEB.1080p.AV1] | That Time I Got Reincarnated as a Slime (Multi-Subs)", 13),
+    ]
+    for name, want_ep in cases:
+        p = match.parse(name)
+        assert p, name
+        m = match.match(p, SLIME)
+        assert m and m[0]["anilist_id"] == 182205 and m[1] == want_ep, f"{name} -> {m}"
+
+
+def test_slime_s1_and_airing_bounds():
+    # season-less S1-era name stays on the S1 entry
+    p = match.parse("[SubsPlease] Tensei Shitara Slime Datta Ken - 08 (1080p).mkv")
+    assert p
+    m = match.match(p, SLIME)
+    assert m and m[0]["anilist_id"] == 101280 and m[1] == 8
+    # RELEASING entry has episodes=None: cap at aired+1 so junk numbering is rejected
+    p = match.parse("[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 99 (1080p).mkv")
+    assert p
+    assert match.match(p, SLIME) is None
+
+
 def test_no_match():
     p = match.parse("[SubsPlease] Some Other Show - 01 (1080p).mkv")
     assert p
