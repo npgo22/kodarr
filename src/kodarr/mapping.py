@@ -62,8 +62,11 @@ async def anilist_ids(
     if media_type == "movie" and tmdb_id:
         cur = await conn.execute("SELECT anilist_id FROM id_map WHERE tmdb_movie_id = %s", (tmdb_id,))
     elif tvdb_id:
+        # tvdb_season 0 = specials/OVAs — don't silently grab those on a show request
         cur = await conn.execute(
-            "SELECT anilist_id FROM id_map WHERE tvdb_id = %s ORDER BY tvdb_season NULLS LAST", (tvdb_id,)
+            """SELECT anilist_id FROM id_map WHERE tvdb_id = %s
+               AND (tvdb_season IS NULL OR tvdb_season > 0) ORDER BY tvdb_season NULLS LAST""",
+            (tvdb_id,),
         )
     else:
         return []
