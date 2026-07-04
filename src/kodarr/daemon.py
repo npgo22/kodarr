@@ -57,9 +57,15 @@ class Daemon:
         qbit_grabs = [g for g in inflight if g["client"] == "qbittorrent"]
         if qbit_grabs:
             by_hash = {g["client_id"]: g for g in qbit_grabs if g["client_id"]}
-            by_name = {g["release_name"]: g for g in qbit_grabs}
             for t in await self.qbit.completed():
-                g = by_hash.get(t["hash"]) or by_name.get(t["name"])
+                g = by_hash.get(t["hash"]) or next(
+                    # qbit's display name often carries a [CRC].mkv suffix the
+                    # indexer title lacks (or vice versa) — prefix-match both ways
+                    (g for g in qbit_grabs
+                     if t["name"].startswith(g["release_name"].removesuffix(".mkv"))
+                     or g["release_name"].startswith(t["name"])),
+                    None,
+                )
                 if g:
                     await self._finish(g, Path(t["path"]))
         sab_grabs = [g for g in inflight if g["client"] == "sabnzbd"]
