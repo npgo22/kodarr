@@ -137,6 +137,9 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
     import asyncio
 
     rows = await db.monitored_series(conn)
+    # one batched fetch covers every entry + franchise root
+    ids = list({i for s in rows for i in (s["anilist_id"], s.get("show_key") or s["anilist_id"])})
+    await anilist.by_ids(http, ids, conn)
     roots_done: set[int] = set()
     for s in rows:
         media = await anilist.by_id(http, s["anilist_id"], conn)

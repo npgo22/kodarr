@@ -227,8 +227,12 @@ class ArrApi:
         cur = await self.d.conn.execute(
             "SELECT anilist_id, tvdb_season FROM id_map WHERE tvdb_id = %s AND tvdb_season > 0", (tvdb_id,)
         )
+        rows = await cur.fetchall()
+        # one batched query warms the cache for every season of the franchise,
+        # so the per-entry franchise walks below are (mostly) API-free
+        await anilist.by_ids(self.d.http, [r["anilist_id"] for r in rows], self.d.conn)
         added = []
-        for r in await cur.fetchall():
+        for r in rows:
             if seasons and r["tvdb_season"] not in seasons:
                 continue
             if await db.get_series(self.d.conn, r["anilist_id"]):

@@ -46,6 +46,7 @@ _SERIES_FORMATS = {"TV", "TV_SHORT", "ONA"}
 
 _SEARCH = f"query ($q: String) {{ Page(perPage: 5) {{ media(search: $q, type: ANIME) {{ {_MEDIA_FIELDS} }} }} }}"
 _BY_ID = f"query ($id: Int) {{ Media(id: $id, type: ANIME) {{ {_MEDIA_FIELDS} }} }}"
+_BY_IDS = f"query ($ids: [Int]) {{ Page(perPage: 10) {{ media(id_in: $ids, type: ANIME) {{ {_MEDIA_FIELDS} }} }} }}"
 
 
 def _clean(media: dict[str, Any]) -> dict[str, Any]:
@@ -190,27 +191,48 @@ async def search(client: httpx.AsyncClient, term: str) -> list[dict[str, Any]]:
     return [_clean(m) for m in data["Page"]["media"]]
 
 
-async def by_id(client: httpx.AsyncClient, anilist_id: int, conn=None) -> dict[str, Any]:
-    """Fetch media, via the Postgres cache when a connection is given.
-    FINISHED entries are effectively immutable -> 30 days; airing -> 6 hours."""
-    if conn is not None:
-        cur = await conn.execute(
-            """SELECT payload FROM anilist_cache WHERE anilist_id = %s
-               AND fetched_at > now() - CASE WHEN payload->>'status' = 'FINISHED'
-                   THEN interval '30 days' ELSE interval '6 hours' END""",
-            (anilist_id,),
+async def _cache_get(conn, anilist_ids: list[int]) -> dict[int, dict]:
+    """FINISHED media is immutable on the axes we use -> cached permanently;
+    airing entries expire after 6 hours (episode counts move)."""
+    cur = await conn.execute(
+        """SELECT anilist_id, payload FROM anilist_cache WHERE anilist_id = ANY(%s)
+           AND (payload->>'status' = 'FINISHED' OR fetched_at > now() - interval '6 hours')""",
+        (anilist_ids,),
+    )
+    return {r["anilist_id"]: r["payload"] for r in await cur.fetchall()}
+
+
+async def _cache_put(conn, media_list: list[dict]) -> None:
+    import json
+
+    async with conn.cursor() as cur:
+        await cur.executemany(
+            """INSERT INTO anilist_cache (anilist_id, payload, fetched_at) VALUES (%s, %s, now())
+               ON CONFLICT (anilist_id) DO UPDATE SET payload = EXCLUDED.payload, fetched_at = now()""",
+            [(m["anilist_id"], json.dumps(m)) for m in media_list],
         )
-        row = await cur.fetchone()
-        if row:
-            return row["payload"]
+
+
+async def by_id(client: httpx.AsyncClient, anilist_id: int, conn=None) -> dict[str, Any]:
+    if conn is not None:
+        cached = await _cache_get(conn, [anilist_id])
+        if anilist_id in cached:
+            return cached[anilist_id]
     data = await _query(client, _BY_ID, {"id": anilist_id})
     media = _clean(data["Media"])
     if conn is not None:
-        import json
-
-        await conn.execute(
-            """INSERT INTO anilist_cache (anilist_id, payload, fetched_at) VALUES (%s, %s, now())
-               ON CONFLICT (anilist_id) DO UPDATE SET payload = EXCLUDED.payload, fetched_at = now()""",
-            (anilist_id, json.dumps(media)),
-        )
+        await _cache_put(conn, [media])
     return media
+
+
+async def by_ids(client: httpx.AsyncClient, anilist_ids: list[int], conn) -> dict[int, dict[str, Any]]:
+    """Batch fetch: one Page(id_in:) request per 10 ids for whatever the cache
+    doesn't already hold. A whole franchise costs one API call instead of N."""
+    out = await _cache_get(conn, anilist_ids)
+    missing = [i for i in anilist_ids if i not in out]
+    for chunk in (missing[i : i + 10] for i in range(0, len(missing), 10)):
+        data = await _query(client, _BY_IDS, {"ids": chunk})
+        fetched = [_clean(m) for m in data["Page"]["media"]]
+        await _cache_put(conn, fetched)
+        out.update({m["anilist_id"]: m for m in fetched})
+    return out

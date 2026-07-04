@@ -94,9 +94,9 @@ class Daemon:
         await db.set_grab_status(self.conn, g["id"], "imported" if n else "failed")
 
     async def metadata_pass(self) -> None:
-        for s in await db.monitored_series(self.conn):
-            if s["status"] == "FINISHED":
-                continue
+        airing = [s for s in await db.monitored_series(self.conn) if s["status"] != "FINISHED"]
+        await anilist.by_ids(self.http, [s["anilist_id"] for s in airing], self.conn)
+        for s in airing:
             media = await anilist.by_id(self.http, s["anilist_id"], self.conn)
             await db.add_series(self.conn, media, s["root_path"])
             if media["aired"] != s["aired"]:
