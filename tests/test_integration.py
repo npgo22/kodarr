@@ -183,24 +183,23 @@ def test_backfill_ranking_blocklist_backoff(postgres, tmp_path):
 
         sp = "[SubsPlease] Sousou no Frieren - 01 (1080p).mkv"
         fake.prowlarr_results = [
-            {"title": "Sousou.no.Frieren.E01.1080p.WEB.x264-USENET", "protocol": "usenet", "downloadUrl": "http://nzb/1"},
+            {"title": sp, "protocol": "usenet", "downloadUrl": "http://nzb/1"},
             {"title": sp, "protocol": "torrent", "downloadUrl": "magnet:?xt=urn:btih:aaaa"},
             {"title": "[Other] Sousou no Frieren - 01.mkv", "protocol": "torrent", "downloadUrl": "magnet:?xt=urn:btih:bbbb"},
         ]
 
         series = await db.get_series(conn, 154587)
         await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series, force=True)
-        assert len(fake.qbit_added) == 1 and "aaaa" in fake.qbit_added[0], "preferred-group torrent should win"
+        assert fake.sab_added == ["http://nzb/1"] and not fake.qbit_added, "preferred-group usenet should win"
 
-        # that grab fails -> blocklisted; next forced pass takes usenet instead
+        # that grab fails -> blocklisted... but same release name covers the torrent
+        # copy too, and [Other] is never eligible -> nothing left to grab
         g = (await db.grabs_in_flight(conn))[0]
         await db.set_grab_status(conn, g["id"], "failed")
         await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series, force=True)
-        assert fake.sab_added == ["http://nzb/1"], "blocklisted release must fall through to usenet"
+        assert not fake.qbit_added, "non-preferred groups must never be grabbed by backfill"
 
         # without force, the weekly backoff skips the series entirely
-        g = (await db.grabs_in_flight(conn))[0]
-        await db.set_grab_status(conn, g["id"], "failed")
         before = len(fake.qbit_added) + len(fake.sab_added)
         await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series)
         assert len(fake.qbit_added) + len(fake.sab_added) == before, "backoff should prevent re-search"

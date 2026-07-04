@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -17,8 +16,12 @@ log = logging.getLogger(__name__)
 def rank(
     results: list[dict], series: dict[str, Any], want_ep: int | None, blocklist: frozenset[str] | set[str] = frozenset()
 ) -> list[tuple[int, dict]]:
-    """Filter to results that really are this series+episode, best first.
-    Preference: preferred-group torrent (seed the simulcast) > usenet > other torrent."""
+    """Preferred-group releases for this exact series+episode, usenet first.
+
+    Backfill never grabs other groups — those only enter the library via the
+    SeaDex sweep. (User policy: seadex usenet > seadex torrent > preferred-group
+    usenet > preferred-group torrent, nothing else.)
+    """
     scored = []
     for res in results:
         if res["title"] in blocklist:
@@ -26,22 +29,15 @@ def rank(
         parsed = match.parse(res["title"])
         if parsed is None:
             continue
+        if not parsed.group or parsed.group.lower() != series["preferred_group"].lower():
+            continue
         m = match.match(parsed, [series])
         if m is None:
             continue
         _, ep = m
         if series["format"] != "MOVIE" and ep != want_ep:
             continue
-        preferred = bool(parsed.group) and parsed.group.lower() == series["preferred_group"].lower()
-        if preferred and res["protocol"] == "torrent":
-            score = 3
-        elif res["protocol"] == "usenet":
-            score = 2
-        else:
-            score = 1
-        if re.search(r"\bdub(bed)?\b|\bvost(fr)?\b", res["title"], re.IGNORECASE):
-            score = 0  # dub-only / single-foreign-sub releases are a last resort
-        scored.append((score, res))
+        scored.append((2 if res["protocol"] == "usenet" else 1, res))
     scored.sort(key=lambda s: s[0], reverse=True)
     return scored
 
@@ -76,16 +72,32 @@ async def backfill_series(
         have = {r["absolute_number"] for r in await cur.fetchall()}
         missing = [ep for ep in range(1, aired + 1) if ep not in have]
 
+    # Query with the romaji base title first (synonyms[0] by anilist._clean
+    # construction) — release groups name in romaji. Strip the season phrase:
+    # groups write "S4"/"4th Season", never AniList's exact title; the season
+    # gate in rank()/match() filters any wrong-cour results the broad query
+    # returns.
+    titles = list(
+        dict.fromkeys(
+            match._strip_season(match.normalize(t))
+            for t in [(series["synonyms"] or [series["title"]])[0], series["title"]]
+        )
+    )
+
     for ep in missing:
         if await db.active_grab(conn, series["anilist_id"], ep):
             continue
-        query = series["title"] if ep is None else f"{series['title']} {ep + series['episode_offset']:02d}"
-        try:
-            results = await prowlarr.search(query)
-        except Exception as e:
-            log.error("prowlarr search failed", extra={"event": "error", "query": query, "error": str(e)})
-            return
-        ranked = rank(results, series, ep, blocklist)
+        ranked = []
+        for title in titles:
+            query = title if ep is None else f"{title} {ep + series['episode_offset']:02d}"
+            try:
+                results = await prowlarr.search(query)
+            except Exception as e:
+                log.error("prowlarr search failed", extra={"event": "error", "query": query, "error": str(e)})
+                return
+            ranked = rank(results, series, ep, blocklist)
+            if ranked:
+                break
         if not ranked:
             log.info("nothing found", extra={"event": "search_miss", "anilist_id": series["anilist_id"], "episode": ep})
             continue

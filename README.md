@@ -10,7 +10,7 @@ release group, and absolute episode number, so that's all kodarr models.
 - Add anime via CLI or **Seerr requests** (webhook; TVDB/TMDB → AniList via Fribb/anime-lists,
   one request adds every season's AniList entry and processes it immediately)
 - **RSS** (SubsPlease) + **autobrr** (webhook) for airing episodes, preferred release group only
-- **Prowlarr** backfill for missing episodes — usenet preferred, except preferred-group torrents
+- **Prowlarr** backfill for missing episodes — preferred group only, usenet copy first (other groups enter solely via SeaDex)
 - **SeaDex** sweep auto-upgrades finished series to the curated best public release
 - **qBittorrent** / **SABnzbd** downloaders; hardlink imports, torrents keep seeding
 - Layout: `anime/Title (Year) [anilist-ID]/Title - 001 [Group].mkv` (absolute numbering, per-entry folders)

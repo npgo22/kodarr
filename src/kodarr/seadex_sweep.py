@@ -89,8 +89,9 @@ async def sweep_series(
 
     # prefer usenet: same group + title via Prowlarr newznab (AnimeTosho mirrors most of Nyaa)
     client, url, client_id = "qbittorrent", magnet(best), None
+    romaji = (series["synonyms"] or [series["title"]])[0]
     try:
-        results = await prowlarr.search(f"{series['title']} {best.release_group}")
+        results = await prowlarr.search(f"{romaji} {best.release_group}")
         usenet = [r for r in results if r["protocol"] == "usenet" and best.release_group.lower() in r["title"].lower()]
         if usenet:
             client, url = "sabnzbd", usenet[0]["url"]
