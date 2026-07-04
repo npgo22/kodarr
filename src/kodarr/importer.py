@@ -78,10 +78,10 @@ async def import_path(
 
         dest = organize.dest_path(row, abs_num, parsed.group, src.suffix.lower())
         organize.import_file(src, dest, replace=replace)
-        await db.upsert_episode(conn, row["anilist_id"], abs_num, str(dest), parsed.group, from_seadex)
+        await db.upsert_episode(conn, row["anilist_id"], abs_num, str(dest), parsed.group, from_seadex, src.name)
         if row["format"] != "MOVIE":
             # placeholder title now; the daily NFO pass fills real titles
-            nfo.write_episode(dest, row, abs_num, (existing or {}).get("title"))
+            nfo.write_episode(dest, row, abs_num, (existing or {}).get("title"), source=src.name)
         touched_dirs.add(str(dest.parent))
         imported += 1
         log.info(

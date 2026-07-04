@@ -40,3 +40,7 @@ preferred = ["SubsPlease"]
 [webhook]
 port = 7878
 token = ""
+
+[tmdb]
+# enrichment only (episode titles, stills, backdrops); structure stays AniList
+api_key = ""

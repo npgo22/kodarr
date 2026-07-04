@@ -14,6 +14,7 @@ from seadex import SeaDexEntry
 from kodarr import anilist, db, grab, importer, mapping, nfo, rss, search, seadex_sweep, webhook
 from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
 from kodarr.config import Config
+from kodarr.tmdb import Tmdb
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class Daemon:
             self.http, cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_path_from, cfg.jellyfin_path_to
         )
         self.seadex = SeaDexEntry()
+        self.tmdb = Tmdb(self.http, cfg.tmdb_api_key)
         self.rss_cache: dict[str, dict[str, str]] = {}
         self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive
 
@@ -132,10 +134,14 @@ class Daemon:
                 extra={"event": "request", "anilist_id": anilist_id, "series": media["title"]},
             )
         if added:
-            t = asyncio.create_task(self._process_new(added))
-            self._bg.add(t)
-            t.add_done_callback(self._bg.discard)
+            self.process_new(added)
         return added
+
+    def process_new(self, anilist_ids: list[int]) -> None:
+        """Fire-and-forget backfill + seadex for freshly added series."""
+        t = asyncio.create_task(self._process_new(anilist_ids))
+        self._bg.add(t)
+        t.add_done_callback(self._bg.discard)
 
     async def _process_new(self, anilist_ids: list[int]) -> None:
         """Backfill + seadex sweep for freshly requested series, without waiting for the daily loops."""
@@ -154,10 +160,13 @@ class Daemon:
 
     async def nfo_pass(self) -> None:
         # picks up newly-published episode titles/art for airing shows
-        await nfo.refresh_all(self.conn, self.http)
+        await nfo.refresh_all(self.conn, self.http, self.tmdb)
 
     async def run(self) -> None:
+        from kodarr import arr_api
+
         app = webhook.make_app(self.handle_autobrr, self.handle_request, self.cfg.webhook_token)
+        arr_api.add_routes(app, self, self.cfg.webhook_token)
         runner = web.AppRunner(app, access_log=None)  # healthz probes would spam the log pipeline
         await runner.setup()
         await web.TCPSite(runner, port=self.cfg.webhook_port).start()

@@ -60,14 +60,17 @@ async def get_episode(conn: AsyncConnection, anilist_id: int, absolute_number: i
 async def upsert_episode(
     conn: AsyncConnection, anilist_id: int, absolute_number: int,
     file_path: str, release_group: str | None, from_seadex: bool,
+    source_name: str | None = None,
 ) -> None:
     await conn.execute(
-        """INSERT INTO episodes (anilist_id, absolute_number, file_path, release_group, from_seadex, imported_at)
-           VALUES (%s, %s, %s, %s, %s, now())
+        """INSERT INTO episodes (anilist_id, absolute_number, file_path, release_group, from_seadex, source_name, imported_at)
+           VALUES (%s, %s, %s, %s, %s, %s, now())
            ON CONFLICT (anilist_id, absolute_number) DO UPDATE SET
              file_path = EXCLUDED.file_path, release_group = EXCLUDED.release_group,
-             from_seadex = EXCLUDED.from_seadex, imported_at = now()""",
-        (anilist_id, absolute_number, file_path, release_group, from_seadex),
+             from_seadex = EXCLUDED.from_seadex,
+             source_name = COALESCE(EXCLUDED.source_name, episodes.source_name),
+             imported_at = now()""",
+        (anilist_id, absolute_number, file_path, release_group, from_seadex, source_name),
     )
 
 
@@ -99,6 +102,11 @@ async def grabs_in_flight(conn: AsyncConnection) -> list[dict]:
 
 async def set_grab_status(conn: AsyncConnection, grab_id: int, status: str) -> None:
     await conn.execute("UPDATE grabs SET status = %s, updated_at = now() WHERE id = %s", (status, grab_id))
+
+
+async def get_id_map(conn: AsyncConnection, anilist_id: int) -> dict | None:
+    cur = await conn.execute("SELECT * FROM id_map WHERE anilist_id = %s", (anilist_id,))
+    return await cur.fetchone()
 
 
 async def failed_release_names(conn: AsyncConnection, anilist_id: int) -> set[str]:

@@ -27,20 +27,23 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
         if not anilist_id:
             continue
         tmdb = e.get("themoviedb_id")
-        movie = None
+        movie = tv = None
         if isinstance(tmdb, dict):
             m = tmdb.get("movie")
             movie = m[0] if isinstance(m, list) and m else m if isinstance(m, int) else None
+            t = tmdb.get("tv")
+            tv = t[0] if isinstance(t, list) and t else t if isinstance(t, int) else None
         tvdb = e.get("tvdb_id")
-        if not tvdb and not movie:
+        if not tvdb and not movie and not tv:
             continue
-        rows.append((anilist_id, tvdb, movie, (e.get("season") or {}).get("tvdb")))
+        season = e.get("season") or {}
+        rows.append((anilist_id, tvdb, movie, season.get("tvdb"), tv, season.get("tmdb")))
     async with conn.transaction():
         await conn.execute("DELETE FROM id_map")
         async with conn.cursor() as cur:
             await cur.executemany(
-                """INSERT INTO id_map (anilist_id, tvdb_id, tmdb_movie_id, tvdb_season)
-                   VALUES (%s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
+                """INSERT INTO id_map (anilist_id, tvdb_id, tmdb_movie_id, tvdb_season, tmdb_tv_id, tmdb_season)
+                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
                 rows,
             )
     log.info("id mapping refreshed", extra={"event": "mapping_refresh", "rows": len(rows)})

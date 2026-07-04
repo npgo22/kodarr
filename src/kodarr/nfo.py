@@ -84,11 +84,20 @@ async def write_season(http: httpx.AsyncClient, series: dict[str, Any], media: d
     await _download(http, media.get("cover_url"), season_dir / "folder.jpg")
 
 
-def write_episode(video_path: Path, series: dict[str, Any], episode: int, title: str | None) -> None:
+def write_episode(
+    video_path: Path, series: dict[str, Any], episode: int, title: str | None,
+    overview: str | None = None, source: str | None = None,
+) -> None:
     ep = ET.Element("episodedetails")
     _el(ep, "title", title or f"Episode {episode}")
     _el(ep, "season", series.get("season") if series.get("season") is not None else 1)
     _el(ep, "episode", episode)
+    # AniDB-style provenance: the release this file came from, visible in the
+    # episode info panel (tells BD vs WEB at a glance)
+    plot = (overview or "").strip()
+    if source:
+        plot = f"{plot}\n\nSource: {source}" if plot else f"Source: {source}"
+    _el(ep, "plot", plot or None)
     _write_xml(ep, video_path.with_suffix(".nfo"))
 
 
@@ -102,9 +111,10 @@ async def write_movie(http: httpx.AsyncClient, series: dict[str, Any], media: di
     await _download(http, media.get("banner_url"), d / "fanart.jpg")
 
 
-async def refresh_all(conn, http: httpx.AsyncClient) -> None:
-    """Write/update NFOs + artwork for the whole library (one AniList fetch
-    per entry and per franchise root, throttled)."""
+async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
+    """Write/update NFOs + artwork for the whole library. AniList for
+    structure/plot/ratings; TMDB (when keyed) enriches episode titles,
+    overviews, stills and show backdrops."""
     import asyncio
 
     from kodarr import anilist, db
@@ -114,25 +124,44 @@ async def refresh_all(conn, http: httpx.AsyncClient) -> None:
     for s in rows:
         media = await anilist.by_id(http, s["anilist_id"])
         await asyncio.sleep(2)
+        idmap = await db.get_id_map(conn, s["anilist_id"])
         if s["format"] == "MOVIE":
             await write_movie(http, s, media)
+            if tmdb_client and idmap and idmap.get("tmdb_movie_id"):
+                url = await tmdb_client.backdrop(movie_id=idmap["tmdb_movie_id"])
+                if url:
+                    await _download(http, url, organize.series_dir(s) / "fanart.jpg")
             continue
         key = s.get("show_key") or s["anilist_id"]
+        show_dir = organize.series_dir(s).parent
         if key not in roots_done:
             root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key)
             if key != s["anilist_id"]:
                 await asyncio.sleep(2)
-            await write_show(http, organize.series_dir(s).parent, root_media)
+            await write_show(http, show_dir, root_media)
+            if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
+                url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])
+                if url:
+                    (show_dir / "fanart.jpg").unlink(missing_ok=True)
+                    await _download(http, url, show_dir / "fanart.jpg")
             roots_done.add(key)
         await write_season(http, s, media)
-        # episode titles: persist + write beside files
-        titles = media["episode_titles"]
+
+        # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
+        titles: dict[int, dict] = {n: {"title": t} for n, t in media["episode_titles"].items()}
+        if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
+            tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
+            for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
+                info = tmdb_eps.get(our_ep + s["episode_offset"])
+                if info:
+                    titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
         cur = await conn.execute(
-            "SELECT absolute_number, file_path, title FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL",
+            "SELECT absolute_number, file_path, title, source_name FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL",
             (s["anilist_id"],),
         )
         for e in await cur.fetchall():
-            title = titles.get(e["absolute_number"]) or e["title"]
+            info = titles.get(e["absolute_number"], {})
+            title = info.get("title") or e["title"]
             if title and title != e["title"]:
                 await conn.execute(
                     "UPDATE episodes SET title=%s WHERE anilist_id=%s AND absolute_number=%s",
@@ -140,5 +169,7 @@ async def refresh_all(conn, http: httpx.AsyncClient) -> None:
                 )
             p = Path(e["file_path"])
             if p.exists():
-                write_episode(p, s, e["absolute_number"], title)
+                write_episode(p, s, e["absolute_number"], title, info.get("overview"), e["source_name"])
+                if info.get("still_url"):
+                    await _download(http, info["still_url"], p.with_name(p.stem + "-thumb.jpg"))
         log.info("nfo written", extra={"event": "nfo", "anilist_id": s["anilist_id"], "series": s["title"]})

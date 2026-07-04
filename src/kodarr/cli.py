@@ -102,9 +102,11 @@ async def cmd_seadex(cfg: Config, args) -> None:
 
 
 async def cmd_nfo(cfg: Config, args) -> None:
+    from kodarr.tmdb import Tmdb
+
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient(follow_redirects=True) as http:
-        await nfo.refresh_all(conn, http)
+        await nfo.refresh_all(conn, http, Tmdb(http, cfg.tmdb_api_key))
     print("nfo refresh complete")
 
 

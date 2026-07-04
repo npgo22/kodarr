@@ -277,6 +277,70 @@ def test_seerr_request_webhook(postgres, tmp_path):
     asyncio.run(main())
 
 
+def test_sonarr_api_for_seerr(postgres, tmp_path):
+    """Seerr's sonarr flow: test connection -> lookup by tvdb -> add with monitored
+    seasons -> re-lookup shows it in library with per-season stats."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from kodarr import arr_api, webhook
+
+    async def main():
+        conn = await fresh_conn()
+        fake = FakeServices()
+        svc = fake.wire()
+        await conn.execute("DELETE FROM id_map")
+        await conn.execute(
+            """INSERT INTO id_map (anilist_id, tvdb_id, tvdb_season) VALUES
+               (101280, 352408, 1), (108511, 352408, 2), (116742, 352408, 2), (182205, 352408, 4)"""
+        )
+
+        d = object.__new__(daemon_mod.Daemon)
+        d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
+        d.conn, d.http = conn, svc.http
+        d.prowlarr, d.qbit, d.sab, d.jellyfin = svc.prowlarr, svc.qbit, svc.sab, svc.jellyfin
+        d.seadex, d._bg = None, set()
+        d.process_new = lambda ids: None  # skip async processing in test
+
+        app = webhook.make_app(d.handle_autobrr, d.handle_request, "tok")
+        arr_api.add_routes(app, d, "tok")
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        h = {"X-Api-Key": "tok"}
+
+        r = await client.get("/api/v3/system/status")
+        assert r.status == 401, "missing api key must be rejected"
+        for path in ("/api/v3/system/status", "/api/v3/rootfolder", "/api/v3/qualityprofile",
+                     "/api/v3/languageprofile", "/api/v3/tag"):
+            r = await client.get(path, headers=h)
+            assert r.status == 200, path
+
+        r = await client.get("/api/v3/series/lookup", params={"term": "tvdb:352408"}, headers=h)
+        [series] = await r.json()
+        assert series["id"] == 0 and {s["seasonNumber"] for s in series["seasons"]} == {1, 2, 4}
+
+        # request season 2 only -> adds both split-cour entries, not S1/S4
+        r = await client.post("/api/v3/series", headers=h, json={
+            "tvdbId": 352408, "qualityProfileId": 1, "rootFolderPath": str(tmp_path / "anime"),
+            "seasons": [{"seasonNumber": 1, "monitored": False}, {"seasonNumber": 2, "monitored": True},
+                        {"seasonNumber": 4, "monitored": False}],
+        })
+        assert r.status == 201
+        rows = await (await conn.execute("SELECT anilist_id FROM series ORDER BY anilist_id")).fetchall()
+        assert [x["anilist_id"] for x in rows] == [108511, 116742]
+
+        r = await client.get("/api/v3/series/352408", headers=h)
+        body = await r.json()
+        s2 = next(s for s in body["seasons"] if s["seasonNumber"] == 2)
+        assert s2["monitored"] and s2["statistics"]["episodeCount"] == 4  # 2+2 fake eps per entry
+
+        r = await client.post("/api/v3/command", headers=h, json={"name": "SeriesSearch", "seriesId": 352408})
+        assert r.status == 200
+        await client.close()
+
+    asyncio.run(main())
+
+
 def test_sab_failed_download(postgres, tmp_path):
     async def main():
         conn = await fresh_conn()

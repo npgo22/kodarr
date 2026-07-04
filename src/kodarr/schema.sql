@@ -58,4 +58,8 @@ CREATE TABLE IF NOT EXISTS id_map (
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS id_map_tvdb_idx ON id_map (tvdb_id);
+ALTER TABLE id_map ADD COLUMN IF NOT EXISTS tmdb_tv_id  integer;
+ALTER TABLE id_map ADD COLUMN IF NOT EXISTS tmdb_season integer;
 CREATE INDEX IF NOT EXISTS id_map_tmdb_idx ON id_map (tmdb_movie_id);
+
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS source_name text;  -- original release filename (what was downloaded)
