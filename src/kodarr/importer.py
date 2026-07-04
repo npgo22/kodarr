@@ -52,6 +52,15 @@ async def import_path(
                 continue
             if parsed.episode is not None:
                 episode = parsed.episode - row["episode_offset"]
+                total = row.get("episodes") or (row.get("aired") or 0) + 1
+                if not 1 <= episode <= total:
+                    # packs span split cours (Thighs Mushoku 1-23 covers two
+                    # AniList entries) — route overflow through full matching
+                    m = match.match(parsed, all_series)
+                    if m is None:
+                        log.warning("pack file out of range", extra={"event": "match_fail", "file": src.name})
+                        continue
+                    row, episode = m
         else:
             m = match.match(parsed, all_series)
             if m is None:

@@ -12,7 +12,7 @@ from typing import Any
 from psycopg import AsyncConnection
 from seadex import EntryNotFoundError, SeaDexEntry, TorrentRecord
 
-from kodarr import db
+from kodarr import db, match
 from kodarr.clients import Prowlarr, Qbit, Sab
 
 log = logging.getLogger(__name__)
@@ -92,7 +92,17 @@ async def sweep_series(
     romaji = (series["synonyms"] or [series["title"]])[0]
     try:
         results = await prowlarr.search(f"{romaji} {best.release_group}")
-        usenet = [r for r in results if r["protocol"] == "usenet" and best.release_group.lower() in r["title"].lower()]
+        # the candidate must actually BE this series: groups like smol renumber
+        # franchise packs ("Monogatari Season 7" = Owarimonogatari), so a
+        # group+substring match alone imported the wrong show. When in doubt,
+        # the SeaDex magnet is the exact curated content — fall back to it.
+        usenet = [
+            r for r in results
+            if r["protocol"] == "usenet"
+            and best.release_group.lower() in r["title"].lower()
+            and (p := match.parse(r["title"])) is not None
+            and match.match(p, [series]) is not None
+        ]
         if usenet:
             client, url = "sabnzbd", usenet[0]["url"]
             release_name = usenet[0]["title"]

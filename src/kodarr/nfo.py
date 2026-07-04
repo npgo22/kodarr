@@ -164,6 +164,11 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
                     (show_dir / "fanart.jpg").unlink(missing_ok=True)
                     await _download(http, url, show_dir / "fanart.jpg")
             roots_done.add(key)
+        cur = await conn.execute(
+            "SELECT count(*) AS n FROM episodes WHERE anilist_id = %s AND file_path IS NOT NULL", (s["anilist_id"],)
+        )
+        if (await cur.fetchone())["n"] == 0:
+            continue  # no files yet: don't create empty season dirs jellyfin would render
         await write_season(http, s, media)
 
         # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
