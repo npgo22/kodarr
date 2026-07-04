@@ -155,6 +155,8 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
         show_dir = organize.series_dir(s).parent
         if key not in roots_done:
             root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
+            if s.get("show_title"):  # manual overrides ("Monogatari Series") beat the root entry's own title
+                root_media = {**root_media, "title": s["show_title"]}
             await write_show(http, show_dir, root_media)
             if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
                 url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])
