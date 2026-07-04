@@ -16,6 +16,8 @@ class Config:
     downloads_dir: str
     jellyfin_url: str
     jellyfin_api_key: str
+    jellyfin_path_from: str  # rewrite library paths for jellyfin's mount, e.g. /data -> /media
+    jellyfin_path_to: str
     prowlarr_url: str
     prowlarr_api_key: str
     sab_url: str
@@ -53,6 +55,8 @@ def load(path: str | Path = "config.toml") -> Config:
         downloads_dir=get("paths", "downloads", "/data/downloads"),
         jellyfin_url=get("jellyfin", "url"),
         jellyfin_api_key=_env("JELLYFIN_API_KEY", get("jellyfin", "api_key")),
+        jellyfin_path_from=get("jellyfin", "path_from"),
+        jellyfin_path_to=get("jellyfin", "path_to"),
         prowlarr_url=get("prowlarr", "url"),
         prowlarr_api_key=_env("PROWLARR_API_KEY", get("prowlarr", "api_key")),
         sab_url=get("sabnzbd", "url"),

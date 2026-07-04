@@ -85,11 +85,14 @@ class Prowlarr:
 
 
 class Jellyfin:
-    def __init__(self, client: httpx.AsyncClient, url: str, api_key: str):
+    def __init__(self, client: httpx.AsyncClient, url: str, api_key: str, path_from: str = "", path_to: str = ""):
         self.http, self.url, self.api_key = client, url.rstrip("/"), api_key
+        self.path_from, self.path_to = path_from, path_to
 
     async def notify(self, path: str) -> None:
         """Tell Jellyfin a library path changed (Shoko-style targeted refresh)."""
+        if self.path_from and path.startswith(self.path_from):
+            path = self.path_to + path[len(self.path_from):]
         try:
             r = await self.http.post(
                 f"{self.url}/Library/Media/Updated",

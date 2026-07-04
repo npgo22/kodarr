@@ -9,6 +9,9 @@ downloads = "/data/downloads"
 [jellyfin]
 url = "http://jellyfin.media.svc.cluster.local:8096"
 
+path_from = "/data"
+path_to = "/media"
+
 [prowlarr]
 url = "http://prowlarr.downloads.svc.cluster.local"
 
