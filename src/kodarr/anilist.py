@@ -59,10 +59,11 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prequel(media: dict[str, Any]) -> dict | None:
-    # any format: cours are sometimes chained THROUGH an OVA/special
-    # (Slime S1 <- Visions of Coleus OVA <- S2), so the walk must not skip them
+    # any format: cours chain THROUGH OVAs (Slime S1 <- Coleus OVA <- S2) and
+    # movies (Bunny Girl S1 <- 3 movies <- Santa) — the walk must skip nothing;
+    # only the season counter filters by format
     for rel in media["relations"]:
-        if rel["type"] == "PREQUEL" and rel["format"] != "MOVIE":
+        if rel["type"] == "PREQUEL":
             return rel
     return None
 
