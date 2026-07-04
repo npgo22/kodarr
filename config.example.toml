@@ -44,3 +44,10 @@ token = ""
 [tmdb]
 # enrichment only (episode titles, stills, backdrops); structure stays AniList
 api_key = ""
+
+[upstream]
+# real sonarr/radarr for non-anime: requests without an AniList mapping proxy through
+sonarr_url = ""
+sonarr_api_key = ""
+radarr_url = ""
+radarr_api_key = ""

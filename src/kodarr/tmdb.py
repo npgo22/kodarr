@@ -50,6 +50,8 @@ class Tmdb:
                 "title": e.get("name"),
                 "overview": e.get("overview"),
                 "still_url": f"{IMG}{e['still_path']}" if e.get("still_path") else None,
+                "aired": e.get("air_date"),
+                "rating": e.get("vote_average") or None,
             }
             for e in data.get("episodes", [])
         }

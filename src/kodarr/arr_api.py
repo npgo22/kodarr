@@ -68,6 +68,41 @@ class ArrApi:
     def __init__(self, daemon):
         self.d = daemon
 
+    # -- non-anime passthrough -------------------------------------------
+    def _upstream(self, movie: bool) -> tuple[str, str]:
+        cfg = self.d.cfg
+        if movie:
+            return cfg.upstream_radarr_url, cfg.upstream_radarr_api_key
+        return cfg.upstream_sonarr_url, cfg.upstream_sonarr_api_key
+
+    async def _proxy(self, request, movie: bool):
+        """Forward a request verbatim to the real sonarr/radarr and relay the
+        response. Used when the title has no AniList mapping (non-anime)."""
+        url, key = self._upstream(movie)
+        if not url:
+            return None
+        body = await request.read() if request.can_read_body else None
+        params = {k: v for k, v in request.query.items() if k != "apikey"}
+        r = await self.d.http.request(
+            request.method, f"{url.rstrip('/')}{request.path}",
+            params=params, content=body,
+            headers={"X-Api-Key": key, "Content-Type": "application/json"},
+            timeout=60,
+        )
+        return web.Response(body=r.content, status=r.status_code, content_type="application/json")
+
+    async def _proxy_if_unmapped_id(self, request, movie: bool):
+        """seerr round-trips upstream's internal ids (small ints) back at us;
+        mapped anime uses tvdb/tmdb ids (large). ponytail: <10000 heuristic —
+        internal arr ids count grabs/series, tvdb/tmdb ids start ~5 digits."""
+        try:
+            rid = int(request.match_info.get("id", "0"))
+        except ValueError:
+            return None
+        if rid < 10000:
+            return await self._proxy(request, movie)
+        return None
+
     # -- shared handlers -------------------------------------------------
     async def system_status(self, request):
         return web.json_response({"version": "4.0.0.0", "appName": "kodarr", "instanceName": "kodarr"})
@@ -90,7 +125,14 @@ class ArrApi:
         return web.json_response([])
 
     async def command(self, request):
-        return web.json_response({"id": 1, "name": (await request.json()).get("name", ""), "status": "completed"})
+        body = await request.json()
+        # searches for proxied (non-anime) series/movies belong upstream
+        target = body.get("seriesId") or (body.get("movieIds") or [0])[0]
+        if target and int(target) < 10000:
+            proxied = await self._proxy(request, bool(body.get("movieIds")))
+            if proxied:
+                return proxied
+        return web.json_response({"id": 1, "name": body.get("name", ""), "status": "completed"})
 
     # -- sonarr: tvdb-keyed series ---------------------------------------
     async def _tvdb_entries(self, tvdb_id: int) -> list[dict]:
@@ -127,11 +169,12 @@ class ArrApi:
     async def series_lookup(self, request):
         term = request.query.get("term", "")
         if not term.startswith("tvdb:"):
-            return web.json_response([])
+            return await self._proxy(request, False) or web.json_response([])
         tvdb_id = int(term.removeprefix("tvdb:"))
         entries = await self._tvdb_entries(tvdb_id)
         if not entries:
-            return web.json_response([])
+            # not anime (no AniList mapping) -> the real sonarr's problem
+            return await self._proxy(request, False) or web.json_response([])
         exists = any(e["in_library"] for e in entries)
         titled = next((e for e in entries if e["title"]), None)
         title = titled["title"] if titled else f"tvdb-{tvdb_id}"
@@ -154,9 +197,15 @@ class ArrApi:
         return web.json_response(out)
 
     async def series_get(self, request):
+        proxied = await self._proxy_if_unmapped_id(request, False)
+        if proxied:
+            return proxied
         tvdb_id = int(request.match_info["id"])
         entries = await self._tvdb_entries(tvdb_id)
         if not any(e["in_library"] for e in entries):
+            proxied = await self._proxy(request, False)
+            if proxied:
+                return proxied
             raise web.HTTPNotFound
         titled = next((e for e in entries if e["title"]), None)
         return web.json_response(_series_shape(tvdb_id, titled["title"] if titled else "", titled["year"] if titled else None,
@@ -165,14 +214,20 @@ class ArrApi:
     async def series_add(self, request):
         body = await request.json()
         tvdb_id = int(body["tvdbId"])
-        wanted = {s["seasonNumber"] for s in body.get("seasons", []) if s.get("monitored")}
-        added = await self._add_tvdb_seasons(tvdb_id, wanted)
         entries = await self._tvdb_entries(tvdb_id)
+        if not entries:
+            proxied = await self._proxy(request, False)
+            if proxied:
+                return proxied
+        wanted = {s["seasonNumber"] for s in body.get("seasons", []) if s.get("monitored")}
+        # AniList fetch + franchise walk takes tens of seconds (throttled);
+        # seerr hard-times-out at 10s — answer now, add in the background
+        self.d.run_bg(self._add_tvdb_seasons(tvdb_id, wanted))
+        log.info("seerr add accepted", extra={"event": "request", "tvdb": tvdb_id, "seasons": sorted(wanted)})
         titled = next((e for e in entries if e["title"]), None)
-        log.info("seerr add", extra={"event": "request", "tvdb": tvdb_id, "seasons": sorted(wanted), "added": added})
         return web.json_response(
-            _series_shape(tvdb_id, titled["title"] if titled else "", titled["year"] if titled else None,
-                          self._tvdb_seasons(entries), True),
+            _series_shape(tvdb_id, titled["title"] if titled else f"tvdb-{tvdb_id}",
+                          titled["year"] if titled else None, self._tvdb_seasons(entries), True),
             status=201,
         )
 
@@ -199,6 +254,7 @@ class ArrApi:
             added.append(r["anilist_id"])
         if added:
             self.d.process_new(added)
+        log.info("seerr add done", extra={"event": "request", "tvdb": tvdb_id, "added": added})
         return added
 
     # -- radarr: tmdb-keyed movies ---------------------------------------
@@ -213,14 +269,14 @@ class ArrApi:
     async def movie_lookup(self, request):
         term = request.query.get("term", "")
         if not term.startswith("tmdb:"):
-            return web.json_response([])
+            return await self._proxy(request, True) or web.json_response([])
         tmdb_id = int(term.removeprefix("tmdb:"))
         row = await self._movie_row(tmdb_id)
         if row:
             return web.json_response([_movie_shape(tmdb_id, row["title"], row["year"], True, row["have"] > 0)])
         cur = await self.d.conn.execute("SELECT anilist_id FROM id_map WHERE tmdb_movie_id = %s", (tmdb_id,))
         if await cur.fetchone() is None:
-            return web.json_response([])
+            return await self._proxy(request, True) or web.json_response([])
         return web.json_response([_movie_shape(tmdb_id, f"tmdb-{tmdb_id}", None, False, False)])
 
     async def movie_list(self, request):
@@ -241,8 +297,14 @@ class ArrApi:
         return web.json_response(out)
 
     async def movie_get(self, request):
+        proxied = await self._proxy_if_unmapped_id(request, True)
+        if proxied:
+            return proxied
         row = await self._movie_row(int(request.match_info["id"]))
         if not row:
+            proxied = await self._proxy(request, True)
+            if proxied:
+                return proxied
             raise web.HTTPNotFound
         cur = await self.d.conn.execute("SELECT tmdb_movie_id FROM id_map WHERE anilist_id = %s", (row["anilist_id"],))
         tmdb_id = (await cur.fetchone())["tmdb_movie_id"]
@@ -256,15 +318,26 @@ class ArrApi:
         cur = await self.d.conn.execute("SELECT anilist_id FROM id_map WHERE tmdb_movie_id = %s", (tmdb_id,))
         r = await cur.fetchone()
         if r is None:
+            proxied = await self._proxy(request, True)
+            if proxied:
+                return proxied
             raise web.HTTPBadRequest(text="no anilist mapping for this tmdb movie")
         if not await db.get_series(self.d.conn, r["anilist_id"]):
-            media = await anilist.by_id(self.d.http, r["anilist_id"])
-            fr = await anilist.franchise(self.d.http, media)
-            await db.add_series(self.d.conn, {**media, **fr}, self.d.cfg.movie_root)
-            self.d.process_new([r["anilist_id"]])
-            log.info("seerr add", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": r["anilist_id"]})
+            self.d.run_bg(self._add_movie(r["anilist_id"], tmdb_id))
         row = await self._movie_row(tmdb_id)
-        return web.json_response(_movie_shape(tmdb_id, row["title"], row["year"], True, row["have"] > 0), status=201)
+        title = row["title"] if row else f"tmdb-{tmdb_id}"
+        return web.json_response(
+            _movie_shape(tmdb_id, title, row["year"] if row else None, True, bool(row and row["have"])), status=201
+        )
+
+    async def _add_movie(self, anilist_id: int, tmdb_id: int) -> None:
+        from kodarr import anilist, db
+
+        media = await anilist.by_id(self.d.http, anilist_id)
+        fr = await anilist.franchise(self.d.http, media)
+        await db.add_series(self.d.conn, {**media, **fr}, self.d.cfg.movie_root)
+        self.d.process_new([anilist_id])
+        log.info("seerr add done", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": anilist_id})
 
 
 def add_routes(app: web.Application, daemon, token: str) -> None:

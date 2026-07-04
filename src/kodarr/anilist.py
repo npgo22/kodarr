@@ -24,6 +24,19 @@ _MEDIA_FIELDS = """
     coverImage { extraLarge }
     bannerImage
     studios(isMain: true) { nodes { name } }
+    season
+    seasonYear
+    duration
+    source
+    startDate { year month day }
+    endDate { year month day }
+    characters(perPage: 15, sort: [ROLE, RELEVANCE]) {
+      edges {
+        role
+        node { name { full } image { large } }
+        voiceActors(language: JAPANESE) { name { full } image { large } }
+      }
+    }
     streamingEpisodes { title thumbnail }
     nextAiringEpisode { episode airingAt }
     relations { edges { relationType node { id format title { romaji english } startDate { year } } } }
@@ -59,6 +72,20 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
         "cover_url": (media.get("coverImage") or {}).get("extraLarge"),
         "banner_url": media.get("bannerImage"),
         "studio": next((s["name"] for s in (media.get("studios") or {}).get("nodes", [])), None),
+        "premiered": _date(media.get("startDate")),
+        "ended": _date(media.get("endDate")),
+        "runtime": media.get("duration"),
+        "source_material": media.get("source"),  # MANGA, LIGHT_NOVEL, ORIGINAL...
+        "characters": [
+            {
+                "character": e["node"]["name"]["full"],
+                "character_image": (e["node"].get("image") or {}).get("large"),
+                "role": e["role"],
+                "va": e["voiceActors"][0]["name"]["full"] if e.get("voiceActors") else None,
+                "va_image": (e["voiceActors"][0].get("image") or {}).get("large") if e.get("voiceActors") else None,
+            }
+            for e in (media.get("characters") or {}).get("edges", [])
+        ],
         "episode_titles": _episode_titles(media.get("streamingEpisodes") or []),
         "relations": [
             {
@@ -71,6 +98,12 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
             for e in (media.get("relations") or {}).get("edges", [])
         ],
     }
+
+
+def _date(d: dict | None) -> str | None:
+    if not d or not d.get("year"):
+        return None
+    return f"{d['year']:04d}-{d.get('month') or 1:02d}-{d.get('day') or 1:02d}"
 
 
 _EP_TITLE = re.compile(r"^Episode (\d+) - (.+)$")  # decimals ("Episode 5.5 - Recap") intentionally don't match

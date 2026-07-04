@@ -87,6 +87,8 @@ class FakeServices:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if request.url.host == "upstream-sonarr":
+            return httpx.Response(200, json=[{"id": 42, "title": "Breaking Bad", "tvdbId": 81189, "upstream": True}])
         if request.url.host == "graphql.anilist.co":
             import json
 
@@ -296,7 +298,8 @@ def test_sonarr_api_for_seerr(postgres, tmp_path):
         )
 
         d = object.__new__(daemon_mod.Daemon)
-        d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
+        d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"),
+                                upstream_sonarr_url="", upstream_sonarr_api_key="", upstream_radarr_url="", upstream_radarr_api_key="")
         d.conn, d.http = conn, svc.http
         d.prowlarr, d.qbit, d.sab, d.jellyfin = svc.prowlarr, svc.qbit, svc.sab, svc.jellyfin
         d.seadex, d._bg = None, set()
@@ -326,6 +329,7 @@ def test_sonarr_api_for_seerr(postgres, tmp_path):
                         {"seasonNumber": 4, "monitored": False}],
         })
         assert r.status == 201
+        await asyncio.gather(*d._bg)  # add runs in background (seerr's 10s timeout)
         rows = await (await conn.execute("SELECT anilist_id FROM series ORDER BY anilist_id")).fetchall()
         assert [x["anilist_id"] for x in rows] == [108511, 116742]
 
@@ -336,6 +340,13 @@ def test_sonarr_api_for_seerr(postgres, tmp_path):
 
         r = await client.post("/api/v3/command", headers=h, json={"name": "SeriesSearch", "seriesId": 352408})
         assert r.status == 200
+
+        # non-anime passthrough: unmapped tvdb id proxies to the upstream sonarr
+        d.cfg.upstream_sonarr_url = "http://upstream-sonarr"
+        d.cfg.upstream_sonarr_api_key = "upkey"
+        r = await client.get("/api/v3/series/lookup", params={"term": "tvdb:81189"}, headers=h)
+        body = await r.json()
+        assert body[0].get("upstream"), "unmapped series must proxy to real sonarr"
         await client.close()
 
     asyncio.run(main())

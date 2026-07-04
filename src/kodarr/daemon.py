@@ -139,9 +139,18 @@ class Daemon:
 
     def process_new(self, anilist_ids: list[int]) -> None:
         """Fire-and-forget backfill + seadex for freshly added series."""
-        t = asyncio.create_task(self._process_new(anilist_ids))
+        self.run_bg(self._process_new(anilist_ids))
+
+    def run_bg(self, coro) -> None:
+        t = asyncio.create_task(self._logged(coro))
         self._bg.add(t)
         t.add_done_callback(self._bg.discard)
+
+    async def _logged(self, coro) -> None:
+        try:
+            await coro
+        except Exception:
+            log.exception("background task failed", extra={"event": "error"})
 
     async def _process_new(self, anilist_ids: list[int]) -> None:
         """Backfill + seadex sweep for freshly requested series, without waiting for the daily loops."""

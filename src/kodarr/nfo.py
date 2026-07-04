@@ -49,17 +49,33 @@ async def _download(http: httpx.AsyncClient, url: str | None, dest: Path) -> Non
 
 def _common(root: ET.Element, media: dict[str, Any]) -> None:
     _el(root, "title", media["title"])
+    _el(root, "originaltitle", next(iter(media.get("synonyms") or []), None))
     _el(root, "plot", media.get("description"))
     _el(root, "year", media.get("year"))
+    _el(root, "premiered", media.get("premiered"))
+    _el(root, "enddate", media.get("ended"))
+    _el(root, "status", {"RELEASING": "Continuing", "FINISHED": "Ended"}.get(media.get("status") or "", None))
+    _el(root, "runtime", media.get("runtime"))
     if media.get("score") is not None:
         _el(root, "rating", media["score"] / 10)  # anilist 0-100 -> nfo 0-10
     for g in media.get("genres") or []:
         _el(root, "genre", g)
     _el(root, "studio", media.get("studio"))
+    if media.get("source_material"):
+        _el(root, "tag", media["source_material"].replace("_", " ").title())
     uid = ET.SubElement(root, "uniqueid")
     uid.set("type", "anilist")
     uid.set("default", "true")
     uid.text = str(media["anilist_id"])
+    # characters + japanese VAs, AniList images; jellyfin shows these as Cast
+    for i, c in enumerate(media.get("characters") or []):
+        if not c.get("va"):
+            continue
+        actor = ET.SubElement(root, "actor")
+        _el(actor, "name", c["va"])
+        _el(actor, "role", c["character"])
+        _el(actor, "thumb", c.get("va_image"))
+        _el(actor, "order", i)
 
 
 async def write_show(http: httpx.AsyncClient, show_dir: Path, root_media: dict[str, Any]) -> None:
@@ -87,11 +103,14 @@ async def write_season(http: httpx.AsyncClient, series: dict[str, Any], media: d
 def write_episode(
     video_path: Path, series: dict[str, Any], episode: int, title: str | None,
     overview: str | None = None, source: str | None = None,
+    aired: str | None = None, rating: float | None = None,
 ) -> None:
     ep = ET.Element("episodedetails")
     _el(ep, "title", title or f"Episode {episode}")
     _el(ep, "season", series.get("season") if series.get("season") is not None else 1)
     _el(ep, "episode", episode)
+    _el(ep, "aired", aired)
+    _el(ep, "rating", rating)
     # AniDB-style provenance: the release this file came from, visible in the
     # episode info panel (tells BD vs WEB at a glance)
     plot = (overview or "").strip()
@@ -169,7 +188,8 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
                 )
             p = Path(e["file_path"])
             if p.exists():
-                write_episode(p, s, e["absolute_number"], title, info.get("overview"), e["source_name"])
+                write_episode(p, s, e["absolute_number"], title, info.get("overview"), e["source_name"],
+                              info.get("aired"), info.get("rating"))
                 if info.get("still_url"):
                     await _download(http, info["still_url"], p.with_name(p.stem + "-thumb.jpg"))
         log.info("nfo written", extra={"event": "nfo", "anilist_id": s["anilist_id"], "series": s["title"]})
