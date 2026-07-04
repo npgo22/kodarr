@@ -36,7 +36,7 @@ spec:
           "type": "timeseries",
           "title": "Grabs by source",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             {
               "refId": "A",
@@ -51,7 +51,7 @@ spec:
           "type": "timeseries",
           "title": "Imports and upgrades",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             {
               "refId": "A",
@@ -66,7 +66,7 @@ spec:
           "type": "stat",
           "title": "Errors",
           "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             { "refId": "A", "queryType": "stats", "expr": "logger:kodarr level:error | stats count()" }
           ],
@@ -82,7 +82,7 @@ spec:
           "type": "stat",
           "title": "SeaDex upgrades",
           "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             { "refId": "A", "queryType": "stats", "expr": "logger:kodarr event:grab source:seadex | stats count()" }
           ],
@@ -93,7 +93,7 @@ spec:
           "type": "timeseries",
           "title": "Match failures (unparseable / unknown releases)",
           "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             { "refId": "A", "queryType": "statsRange", "expr": "logger:kodarr event:match_fail | stats count()" }
           ],
@@ -104,7 +104,7 @@ spec:
           "type": "logs",
           "title": "Grab / import activity",
           "gridPos": { "h": 10, "w": 12, "x": 0, "y": 14 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             { "refId": "A", "queryType": "instant", "expr": "logger:kodarr event:(grab OR import OR upgrade OR replace)" }
           ],
@@ -115,7 +115,7 @@ spec:
           "type": "logs",
           "title": "Warnings and errors",
           "gridPos": { "h": 10, "w": 12, "x": 12, "y": 14 },
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "$${DS_VICTORIALOGS}" },
           "targets": [
             { "refId": "A", "queryType": "instant", "expr": "logger:kodarr level:(error OR warning)" }
           ],

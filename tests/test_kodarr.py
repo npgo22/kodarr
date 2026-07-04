@@ -116,6 +116,18 @@ def test_slime_s1_and_airing_bounds():
     assert match.match(p, SLIME) is None
 
 
+def test_rank_dub_last_resort():
+    from kodarr.search import rank
+
+    results = [
+        {"title": "[Yameii] That Time I Got Reincarnated as a Slime - S04E06 [English Dub] [CR WEB-DL 1080p]", "protocol": "torrent", "url": "u1"},
+        {"title": "That Time I Got Reincarnated as a Slime S04E06 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", "protocol": "torrent", "url": "u2"},
+    ]
+    ranked = rank(results, SLIME[3], 6)
+    assert [s for s, _ in ranked] == [1, 0], "dub release must rank below any other match"
+    assert "VARYG" in ranked[0][1]["title"]
+
+
 def test_no_match():
     p = match.parse("[SubsPlease] Some Other Show - 01 (1080p).mkv")
     assert p

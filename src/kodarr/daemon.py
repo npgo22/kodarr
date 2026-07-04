@@ -145,7 +145,7 @@ class Daemon:
 
     async def run(self) -> None:
         app = webhook.make_app(self.handle_autobrr, self.handle_request, self.cfg.webhook_token)
-        runner = web.AppRunner(app)
+        runner = web.AppRunner(app, access_log=None)  # healthz probes would spam the log pipeline
         await runner.setup()
         await web.TCPSite(runner, port=self.cfg.webhook_port).start()
         log.info("kodarr started", extra={"event": "start", "webhook_port": self.cfg.webhook_port})

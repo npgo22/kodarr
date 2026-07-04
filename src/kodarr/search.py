@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -38,6 +39,8 @@ def rank(
             score = 2
         else:
             score = 1
+        if re.search(r"\bdub(bed)?\b", res["title"], re.IGNORECASE):
+            score = 0  # dub-only releases are a last resort
         scored.append((score, res))
     scored.sort(key=lambda s: s[0], reverse=True)
     return scored
