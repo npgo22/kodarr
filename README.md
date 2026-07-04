@@ -95,6 +95,33 @@ CLI: `add <search|id> [--offset N] [--show-root ID] [--season N]`, `list`,
 `remove`, `backfill [--dry-run]`, `seadex [--force]`, `import <path> [--seadex]`,
 `nfo`, `run [--dry-run]`.
 
+## Scope & shortcomings
+
+kodarr is a **single-admin, internal-only service** for a trusted network. It
+has no user accounts, no TLS, and a single shared API token — never expose it
+publicly; user-facing access goes through Seerr (behind your SSO). Known
+limits, by design or honestly unsolved:
+
+- **Anime only, one grab policy.** No quality profiles or custom formats — the
+  ladder is SeaDex > preferred group at 1080p+, take it or fork it. Non-anime
+  is proxied to real Sonarr/Radarr, not handled.
+- **Coverage is bounded by its sources.** Requests need a Fribb id mapping
+  (~8k anime); shows without SubsPlease or SeaDex releases (old OVAs, obscure
+  titles) sit at 0 files unless you point autobrr at them or import manually.
+  Episode titles/stills need a TMDB mapping.
+- **Filename parsing, not hashes.** Matching is anitopy + AniList synonyms —
+  reliable for known groups, but a weirdly named release logs `match_fail`
+  instead of importing (watch the Grafana panel). Shoko's ed2k-hash certainty
+  is the trade-off we gave up for zero maintenance.
+- **Franchise grouping trusts AniList relations.** Pathological graphs
+  (Monogatari) need manual `--show-root`/`--season` overrides.
+- **No missing-episode placeholders in Jellyfin** — NFOs can't create virtual
+  items; you only see what's on disk.
+- **Season packs**: extras (S00) inside packs are skipped, not imported as
+  specials; multi-episode files get one episode number.
+- The Sonarr/Radarr API surface is the subset Seerr calls — it is not a
+  general Sonarr replacement for other tools.
+
 ## Dev
 
 ```sh

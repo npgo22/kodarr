@@ -12,6 +12,7 @@ per-season requests add exactly those cours. Auth: X-Api-Key == webhook token.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Any
 
@@ -90,18 +91,6 @@ class ArrApi:
             timeout=60,
         )
         return web.Response(body=r.content, status=r.status_code, content_type="application/json")
-
-    async def _proxy_if_unmapped_id(self, request, movie: bool):
-        """seerr round-trips upstream's internal ids (small ints) back at us;
-        mapped anime uses tvdb/tmdb ids (large). ponytail: <10000 heuristic —
-        internal arr ids count grabs/series, tvdb/tmdb ids start ~5 digits."""
-        try:
-            rid = int(request.match_info.get("id", "0"))
-        except ValueError:
-            return None
-        if rid < 10000:
-            return await self._proxy(request, movie)
-        return None
 
     # -- shared handlers -------------------------------------------------
     async def system_status(self, request):
@@ -197,10 +186,11 @@ class ArrApi:
         return web.json_response(out)
 
     async def series_get(self, request):
-        proxied = await self._proxy_if_unmapped_id(request, False)
-        if proxied:
-            return proxied
         tvdb_id = int(request.match_info["id"])
+        if tvdb_id < 10000:  # upstream sonarr's internal id, not a tvdb id
+            proxied = await self._proxy(request, False)
+            if proxied:
+                return proxied
         entries = await self._tvdb_entries(tvdb_id)
         if not any(e["in_library"] for e in entries):
             proxied = await self._proxy(request, False)
@@ -231,10 +221,6 @@ class ArrApi:
             status=201,
         )
 
-    async def series_update(self, request):
-        # seerr PUTs the full series with newly-monitored seasons on follow-up requests
-        return await self.series_add(request)
-
     async def _add_tvdb_seasons(self, tvdb_id: int, seasons: set[int]) -> list[int]:
         from kodarr import anilist, db
 
@@ -253,7 +239,7 @@ class ArrApi:
             await db.add_series(self.d.conn, {**media, **fr}, root)
             added.append(r["anilist_id"])
         if added:
-            self.d.process_new(added)
+            self.d.run_bg(self.d.process_new(added))
         log.info("seerr add done", extra={"event": "request", "tvdb": tvdb_id, "added": added})
         return added
 
@@ -297,10 +283,12 @@ class ArrApi:
         return web.json_response(out)
 
     async def movie_get(self, request):
-        proxied = await self._proxy_if_unmapped_id(request, True)
-        if proxied:
-            return proxied
-        row = await self._movie_row(int(request.match_info["id"]))
+        movie_id = int(request.match_info["id"])
+        if movie_id < 10000:  # upstream radarr's internal id, not a tmdb id
+            proxied = await self._proxy(request, True)
+            if proxied:
+                return proxied
+        row = await self._movie_row(movie_id)
         if not row:
             proxied = await self._proxy(request, True)
             if proxied:
@@ -336,7 +324,7 @@ class ArrApi:
         media = await anilist.by_id(self.d.http, anilist_id)
         fr = await anilist.franchise(self.d.http, media)
         await db.add_series(self.d.conn, {**media, **fr}, self.d.cfg.movie_root)
-        self.d.process_new([anilist_id])
+        self.d.run_bg(self.d.process_new([anilist_id]))
         log.info("seerr add done", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": anilist_id})
 
 
@@ -346,8 +334,8 @@ def add_routes(app: web.Application, daemon, token: str) -> None:
     @web.middleware
     async def auth(request, handler):
         # real sonarr accepts header or query param; seerr uses ?apikey=
-        got = request.headers.get("X-Api-Key") or request.query.get("apikey")
-        if request.path.startswith("/api/v3") and got != token:
+        got = request.headers.get("X-Api-Key") or request.query.get("apikey") or ""
+        if request.path.startswith("/api/v3") and not hmac.compare_digest(got, token):
             return web.json_response({"error": "unauthorized"}, status=401)
         return await handler(request)
 
@@ -364,8 +352,8 @@ def add_routes(app: web.Application, daemon, token: str) -> None:
     r.add_get("/api/v3/series", api.series_list)
     r.add_get("/api/v3/series/{id}", api.series_get)
     r.add_post("/api/v3/series", api.series_add)
-    r.add_put("/api/v3/series/{id}", api.series_update)
-    r.add_put("/api/v3/series", api.series_update)
+    # seerr PUTs the full series with newly-monitored seasons on follow-up requests
+    r.add_put("/api/v3/series/{id}", api.series_add)
     r.add_get("/api/v3/movie/lookup", api.movie_lookup)
     r.add_get("/api/v3/movie", api.movie_list)
     r.add_get("/api/v3/movie/{id}", api.movie_get)

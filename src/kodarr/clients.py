@@ -31,10 +31,14 @@ class Qbit:
     async def add(self, url_or_magnet: str) -> None:
         # stopped/paused=false overrides qbit's global "add stopped" preference
         # (common in cross-seed setups); both spellings for qbit 4.x/5.x
-        await self._post(
-            "/api/v2/torrents/add",
-            {"urls": url_or_magnet, "category": self.category, "stopped": "false", "paused": "false"},
-        )
+        try:
+            await self._post(
+                "/api/v2/torrents/add",
+                {"urls": url_or_magnet, "category": self.category, "stopped": "false", "paused": "false"},
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 409:  # 409 = torrent already in client
+                raise
 
     async def completed(self) -> list[dict[str, Any]]:
         """[{hash, name, content_path}] for finished torrents in our category."""

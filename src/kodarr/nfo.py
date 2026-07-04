@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from kodarr import organize
+from kodarr import anilist, db, organize
 
 log = logging.getLogger(__name__)
 
@@ -135,8 +135,6 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
     structure/plot/ratings; TMDB (when keyed) enriches episode titles,
     overviews, stills and show backdrops."""
     import asyncio
-
-    from kodarr import anilist, db
 
     rows = await db.monitored_series(conn)
     roots_done: set[int] = set()

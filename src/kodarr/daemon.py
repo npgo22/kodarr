@@ -120,39 +120,20 @@ class Daemon:
             self.conn, self.qbit, release_name, download_url, "autobrr", dry_run=self.cfg.dry_run
         )
 
-    async def handle_request(self, media_type: str, tvdb_id: int | None, tmdb_id: int | None) -> list[int]:
-        """Jellyseerr approved a request: map to AniList, add, and process now."""
-        added = []
-        for anilist_id in await mapping.anilist_ids(self.conn, self.http, media_type, tvdb_id, tmdb_id):
-            media = await anilist.by_id(self.http, anilist_id)
-            fr = await anilist.franchise(self.http, media)
-            root = self.cfg.movie_root if media["format"] == "MOVIE" else self.cfg.anime_root
-            await db.add_series(self.conn, {**media, **fr}, root)
-            added.append(anilist_id)
-            log.info(
-                "request added",
-                extra={"event": "request", "anilist_id": anilist_id, "series": media["title"]},
-            )
-        if added:
-            self.process_new(added)
-        return added
-
-    def process_new(self, anilist_ids: list[int]) -> None:
-        """Fire-and-forget backfill + seadex for freshly added series."""
-        self.run_bg(self._process_new(anilist_ids))
-
     def run_bg(self, coro) -> None:
-        t = asyncio.create_task(self._logged(coro))
+        """Fire-and-forget task; exceptions logged, reference kept until done."""
+
+        async def wrapped():
+            try:
+                await coro
+            except Exception:
+                log.exception("background task failed", extra={"event": "error"})
+
+        t = asyncio.create_task(wrapped())
         self._bg.add(t)
         t.add_done_callback(self._bg.discard)
 
-    async def _logged(self, coro) -> None:
-        try:
-            await coro
-        except Exception:
-            log.exception("background task failed", extra={"event": "error"})
-
-    async def _process_new(self, anilist_ids: list[int]) -> None:
+    async def process_new(self, anilist_ids: list[int]) -> None:
         """Backfill + seadex sweep for freshly requested series, without waiting for the daily loops."""
         for anilist_id in anilist_ids:
             s = await db.get_series(self.conn, anilist_id)
@@ -174,7 +155,7 @@ class Daemon:
     async def run(self) -> None:
         from kodarr import arr_api
 
-        app = webhook.make_app(self.handle_autobrr, self.handle_request, self.cfg.webhook_token)
+        app = webhook.make_app(self.handle_autobrr, self.cfg.webhook_token)
         arr_api.add_routes(app, self, self.cfg.webhook_token)
         runner = web.AppRunner(app, access_log=None)  # healthz probes would spam the log pipeline
         await runner.setup()

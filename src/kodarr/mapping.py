@@ -55,22 +55,3 @@ async def refresh_if_stale(conn: AsyncConnection, http: httpx.AsyncClient, days:
     )
     if await cur.fetchone() is None:
         await refresh(conn, http)
-
-
-async def anilist_ids(
-    conn: AsyncConnection, http: httpx.AsyncClient, media_type: str,
-    tvdb_id: int | None, tmdb_id: int | None,
-) -> list[int]:
-    await refresh_if_stale(conn, http)
-    if media_type == "movie" and tmdb_id:
-        cur = await conn.execute("SELECT anilist_id FROM id_map WHERE tmdb_movie_id = %s", (tmdb_id,))
-    elif tvdb_id:
-        # tvdb_season 0 = specials/OVAs — don't silently grab those on a show request
-        cur = await conn.execute(
-            """SELECT anilist_id FROM id_map WHERE tvdb_id = %s
-               AND (tvdb_season IS NULL OR tvdb_season > 0) ORDER BY tvdb_season NULLS LAST""",
-            (tvdb_id,),
-        )
-    else:
-        return []
-    return [r["anilist_id"] for r in await cur.fetchall()]
