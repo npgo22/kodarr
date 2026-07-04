@@ -181,10 +181,21 @@ def test_no_match():
 
 
 def test_dest_path_episode():
+    # no franchise fields -> entry is its own show, season 1
     d = organize.dest_path(FRIEREN, 5, "SubsPlease", ".mkv")
     assert d == Path(
         "/data/media/anime/Frieren Beyond Journey's End (2023) [anilist-154587]/"
-        "Frieren Beyond Journey's End - 005 [SubsPlease].mkv"
+        "Season 01/Frieren Beyond Journey's End S01E005 [SubsPlease].mkv"
+    )
+
+
+def test_dest_path_franchise_season():
+    cour2 = {**FRIEREN, "anilist_id": 182255, "title": "Frieren Season 2",
+             "show_key": 154587, "show_title": "Frieren: Beyond Journey's End", "show_year": 2023, "season": 2}
+    d = organize.dest_path(cour2, 4, "SubsPlease", ".mkv")
+    assert d == Path(
+        "/data/media/anime/Frieren Beyond Journey's End (2023) [anilist-154587]/"
+        "Season 02/Frieren Beyond Journey's End S02E004 [SubsPlease].mkv"
     )
 
 

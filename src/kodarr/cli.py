@@ -29,13 +29,22 @@ async def cmd_add(cfg: Config, args) -> None:
                 print(f"  {m['anilist_id']:>7}  {m['title']} ({m['year']}, {m['format']}, {m['episodes']} eps)")
             return
     root = cfg.movie_root if media["format"] == "MOVIE" else cfg.anime_root
-    await db.add_series(conn, media, root)
+    async with httpx.AsyncClient() as http:
+        fr = await anilist.franchise(http, media)
+    if args.show_root or args.season:
+        fr = {**fr, **({"show_key": args.show_root} if args.show_root else {}),
+              **({"season": args.season} if args.season else {})}
+        if args.show_root:
+            async with httpx.AsyncClient() as http:
+                root_media = await anilist.by_id(http, args.show_root)
+            fr["show_title"], fr["show_year"] = root_media["title"], root_media["year"]
+    await db.add_series(conn, {**media, **fr}, root)
     if args.offset or args.group:
         await conn.execute(
             "UPDATE series SET episode_offset = %s, preferred_group = %s WHERE anilist_id = %s",
             (args.offset, args.group or "SubsPlease", media["anilist_id"]),
         )
-    print(f"added {media['title']} [anilist-{media['anilist_id']}] -> {root}")
+    print(f"added {media['title']} [anilist-{media['anilist_id']}] -> {fr['show_title']} / Season {fr['season']:02d}")
 
 
 async def cmd_list(cfg: Config, args) -> None:
@@ -109,6 +118,8 @@ def main() -> None:
     p.add_argument("query")
     p.add_argument("--offset", type=int, default=0, help="release abs number - anilist episode")
     p.add_argument("--group", default=None, help="preferred release group (default SubsPlease)")
+    p.add_argument("--show-root", type=int, default=None, help="override franchise root anilist id")
+    p.add_argument("--season", type=int, default=None, help="override season number in the show folder")
     p.set_defaults(fn=cmd_add)
 
     sub.add_parser("list", help="list library").set_defaults(fn=cmd_list)

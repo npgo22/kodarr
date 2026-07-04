@@ -18,20 +18,30 @@ def sanitize(name: str) -> str:
 
 
 def series_dir(series: dict[str, Any]) -> Path:
-    """<root>/Title (Year) [anilist-ID]"""
-    title = sanitize(series["title"])
-    year = f" ({series['year']})" if series.get("year") else ""
-    return Path(series["root_path"]) / f"{title}{year} [anilist-{series['anilist_id']}]"
+    """<root>/ShowTitle (Year) [anilist-<show_key>]/Season NN
+
+    One Jellyfin show per franchise (AniList prequel chain), one season per
+    AniList entry. Movies and ungrouped entries fall back to their own values.
+    """
+    title = sanitize(series.get("show_title") or series["title"])
+    key = series.get("show_key") or series["anilist_id"]
+    year_val = series.get("show_year") or series.get("year")
+    year = f" ({year_val})" if year_val else ""
+    show = Path(series["root_path"]) / f"{title}{year} [anilist-{key}]"
+    if series["format"] == "MOVIE":
+        return show
+    return show / f"Season {series.get('season') or 1:02d}"
 
 
 def dest_path(series: dict[str, Any], episode: int | None, group: str | None, ext: str) -> Path:
-    title = sanitize(series["title"])
+    title = sanitize(series.get("show_title") or series["title"])
     grp = f" [{sanitize(group)}]" if group else ""
     if series["format"] == "MOVIE" or episode is None:
-        year = f" ({series['year']})" if series.get("year") else ""
+        year_val = series.get("show_year") or series.get("year")
+        year = f" ({year_val})" if year_val else ""
         name = f"{title}{year}{grp}{ext}"
     else:
-        name = f"{title} - {episode:03d}{grp}{ext}"
+        name = f"{title} S{series.get('season') or 1:02d}E{episode:03d}{grp}{ext}"
     return series_dir(series) / name
 
 

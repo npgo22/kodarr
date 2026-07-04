@@ -123,8 +123,9 @@ class Daemon:
         added = []
         for anilist_id in await mapping.anilist_ids(self.conn, self.http, media_type, tvdb_id, tmdb_id):
             media = await anilist.by_id(self.http, anilist_id)
+            fr = await anilist.franchise(self.http, media)
             root = self.cfg.movie_root if media["format"] == "MOVIE" else self.cfg.anime_root
-            await db.add_series(self.conn, media, root)
+            await db.add_series(self.conn, {**media, **fr}, root)
             added.append(anilist_id)
             log.info(
                 "request added",

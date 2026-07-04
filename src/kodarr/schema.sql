@@ -15,6 +15,13 @@ CREATE TABLE IF NOT EXISTS series (
     added_at        timestamptz NOT NULL DEFAULT now()
 );
 
+-- franchise grouping (AniList prequel-chain walk): one Jellyfin show folder
+-- per show_key, one "Season NN" folder per entry
+ALTER TABLE series ADD COLUMN IF NOT EXISTS show_key    integer;
+ALTER TABLE series ADD COLUMN IF NOT EXISTS show_title  text;
+ALTER TABLE series ADD COLUMN IF NOT EXISTS show_year   integer;
+ALTER TABLE series ADD COLUMN IF NOT EXISTS season      integer;
+
 CREATE TABLE IF NOT EXISTS episodes (
     anilist_id      integer NOT NULL REFERENCES series ON DELETE CASCADE,
     absolute_number integer NOT NULL,           -- movies use 1

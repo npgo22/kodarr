@@ -18,13 +18,24 @@ async def connect(dsn: str) -> AsyncConnection:
 
 
 async def add_series(conn: AsyncConnection, media: dict, root_path: str) -> None:
+    # franchise fields are set at add time; metadata refreshes omit them and
+    # must not clobber (COALESCE keeps the stored value)
+    params = {"show_key": None, "show_title": None, "show_year": None, "season": None,
+              **media, "root_path": root_path}
+    params.pop("relations", None)
     await conn.execute(
-        """INSERT INTO series (anilist_id, title, year, format, episodes, aired, status, synonyms, root_path)
-           VALUES (%(anilist_id)s, %(title)s, %(year)s, %(format)s, %(episodes)s, %(aired)s, %(status)s, %(synonyms)s, %(root_path)s)
+        """INSERT INTO series (anilist_id, title, year, format, episodes, aired, status, synonyms, root_path,
+                               show_key, show_title, show_year, season)
+           VALUES (%(anilist_id)s, %(title)s, %(year)s, %(format)s, %(episodes)s, %(aired)s, %(status)s, %(synonyms)s, %(root_path)s,
+                   %(show_key)s, %(show_title)s, %(show_year)s, %(season)s)
            ON CONFLICT (anilist_id) DO UPDATE SET
              title = EXCLUDED.title, year = EXCLUDED.year, episodes = EXCLUDED.episodes,
-             aired = EXCLUDED.aired, status = EXCLUDED.status, synonyms = EXCLUDED.synonyms""",
-        {**media, "root_path": root_path},
+             aired = EXCLUDED.aired, status = EXCLUDED.status, synonyms = EXCLUDED.synonyms,
+             show_key = COALESCE(EXCLUDED.show_key, series.show_key),
+             show_title = COALESCE(EXCLUDED.show_title, series.show_title),
+             show_year = COALESCE(EXCLUDED.show_year, series.show_year),
+             season = COALESCE(EXCLUDED.season, series.season)""",
+        params,
     )
 
 
