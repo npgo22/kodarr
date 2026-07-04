@@ -60,7 +60,11 @@ async def cmd_remove(cfg: Config, args) -> None:
 async def cmd_import(cfg: Config, args) -> None:
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient() as http:
-        jf = Jellyfin(http, cfg.jellyfin_url, cfg.jellyfin_api_key) if cfg.jellyfin_url else None
+        jf = (
+            Jellyfin(http, cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_path_from, cfg.jellyfin_path_to)
+            if cfg.jellyfin_url
+            else None
+        )
         n = await importer.import_path(conn, jf, Path(args.path), from_seadex=args.seadex)
     print(f"imported {n} file(s)")
 

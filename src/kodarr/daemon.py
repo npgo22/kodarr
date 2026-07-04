@@ -28,7 +28,9 @@ class Daemon:
         self.qbit = Qbit(self.http, cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, cfg.qbit_category)
         self.sab = Sab(self.http, cfg.sab_url, cfg.sab_api_key, cfg.sab_category)
         self.prowlarr = Prowlarr(self.http, cfg.prowlarr_url, cfg.prowlarr_api_key)
-        self.jellyfin = Jellyfin(self.http, cfg.jellyfin_url, cfg.jellyfin_api_key)
+        self.jellyfin = Jellyfin(
+            self.http, cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_path_from, cfg.jellyfin_path_to
+        )
         self.seadex = SeaDexEntry()
         self.rss_cache: dict[str, dict[str, str]] = {}
         self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive

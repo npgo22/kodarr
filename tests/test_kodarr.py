@@ -129,6 +129,29 @@ def test_rank_dub_last_resort():
     assert "VARYG" in ranked[0][1]["title"]
 
 
+def test_jellyfin_path_translation():
+    import asyncio
+    import json
+
+    import httpx
+
+    from kodarr.clients import Jellyfin
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.read())["Updates"][0]["Path"])
+        return httpx.Response(204)
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        jf = Jellyfin(http, "http://jf", "key", "/data", "/media")
+        await jf.notify("/data/media/anime/Show [anilist-1]")
+
+    asyncio.run(main())
+    assert seen == ["/media/media/anime/Show [anilist-1]"]
+
+
 def test_no_match():
     p = match.parse("[SubsPlease] Some Other Show - 01 (1080p).mkv")
     assert p
