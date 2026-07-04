@@ -49,6 +49,30 @@ def test_match_offset_routes_to_sequel_entry():
     assert m and m[0]["anilist_id"] == 999999 and m[1] == 2
 
 
+def test_season_tagged_release_routes_to_cour_without_offset():
+    # "S2 - 04" is per-cour numbering: must hit the season-2 entry as ep 4,
+    # ignoring the absolute episode_offset, and never the season-1 entry.
+    p = match.parse("[Erai-raws] Sousou no Frieren S2 - 04 (1080p).mkv")
+    assert p and p.season == 2 and p.episode == 4
+    m = match.match(p, [FRIEREN, COUR2])
+    assert m and m[0]["anilist_id"] == 999999 and m[1] == 4
+
+
+def test_season_one_release_skips_sequel_entry():
+    p = match.parse("[SubsPlease] Sousou no Frieren S1 - 04 (1080p).mkv")
+    assert p and p.season == 1
+    m = match.match(p, [COUR2, FRIEREN])  # sequel listed first on purpose
+    assert m and m[0]["anilist_id"] == 154587
+
+
+def test_digit_title_not_read_as_season():
+    eighty_six = {**FRIEREN, "anilist_id": 116589, "title": "86: Eighty Six", "synonyms": ["86"], "episodes": 11}
+    p = match.parse("[SubsPlease] 86 - Eighty Six S1 - 03 (1080p).mkv")
+    assert p and p.season == 1
+    m = match.match(p, [eighty_six])
+    assert m and m[0]["anilist_id"] == 116589 and m[1] == 3
+
+
 def test_no_match():
     p = match.parse("[SubsPlease] Some Other Show - 01 (1080p).mkv")
     assert p

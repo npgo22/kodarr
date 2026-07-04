@@ -38,7 +38,8 @@ def _entry_season(names: set[str]) -> int:
         if m:
             return int(m.group(1) or m.group(2))
     for n in names:
-        if n.isdigit():
+        # cap: shows titled with a number ("86") must not read as a season
+        if n.isdigit() and 1 <= int(n) <= 20:
             return int(n)
     return 1
 
@@ -92,7 +93,9 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
             continue  # release names a different cour than this entry
         ep = None
         if parsed.episode is not None:
-            ep = parsed.episode - row["episode_offset"]
+            # a season-tagged release ("S2 - 04") numbers per cour already;
+            # episode_offset only translates absolute numbering
+            ep = parsed.episode if parsed.season is not None else parsed.episode - row["episode_offset"]
             total = row.get("episodes")
             if ep < 1 or (total and ep > total):
                 continue  # right title, wrong entry (e.g. sequel cour)
