@@ -29,7 +29,12 @@ class Qbit:
         return r
 
     async def add(self, url_or_magnet: str) -> None:
-        await self._post("/api/v2/torrents/add", {"urls": url_or_magnet, "category": self.category})
+        # stopped/paused=false overrides qbit's global "add stopped" preference
+        # (common in cross-seed setups); both spellings for qbit 4.x/5.x
+        await self._post(
+            "/api/v2/torrents/add",
+            {"urls": url_or_magnet, "category": self.category, "stopped": "false", "paused": "false"},
+        )
 
     async def completed(self) -> list[dict[str, Any]]:
         """[{hash, name, content_path}] for finished torrents in our category."""
