@@ -139,8 +139,7 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
     rows = await db.monitored_series(conn)
     roots_done: set[int] = set()
     for s in rows:
-        media = await anilist.by_id(http, s["anilist_id"])
-        await asyncio.sleep(2)
+        media = await anilist.by_id(http, s["anilist_id"], conn)
         idmap = await db.get_id_map(conn, s["anilist_id"])
         if s["format"] == "MOVIE":
             await write_movie(http, s, media)
@@ -152,9 +151,7 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
         key = s.get("show_key") or s["anilist_id"]
         show_dir = organize.series_dir(s).parent
         if key not in roots_done:
-            root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key)
-            if key != s["anilist_id"]:
-                await asyncio.sleep(2)
+            root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
             await write_show(http, show_dir, root_media)
             if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
                 url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])

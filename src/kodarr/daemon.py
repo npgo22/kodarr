@@ -37,7 +37,9 @@ class Daemon:
         self.rss_cache: dict[str, dict[str, str]] = {}
         self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive
 
-    async def _every(self, seconds: int, fn, name: str) -> None:
+    async def _every(self, seconds: int, fn, name: str, first_delay: int = 0) -> None:
+        # stagger the daily passes so they don't all hit AniList at boot
+        await asyncio.sleep(first_delay)
         while True:
             try:
                 await fn()
@@ -95,14 +97,13 @@ class Daemon:
         for s in await db.monitored_series(self.conn):
             if s["status"] == "FINISHED":
                 continue
-            media = await anilist.by_id(self.http, s["anilist_id"])
+            media = await anilist.by_id(self.http, s["anilist_id"], self.conn)
             await db.add_series(self.conn, media, s["root_path"])
             if media["aired"] != s["aired"]:
                 # new episodes exist — let backfill re-search without waiting out its backoff
                 await self.conn.execute(
                     "UPDATE series SET last_search = NULL WHERE anilist_id = %s", (s["anilist_id"],)
                 )
-            await asyncio.sleep(2)  # stay far below AniList's 30 req/min limit
 
     async def backfill_pass(self) -> None:
         for s in await db.monitored_series(self.conn):
@@ -164,8 +165,8 @@ class Daemon:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self._every(self.cfg.rss_interval, self.rss_pass, "rss"))
             tg.create_task(self._every(30, self.watch_pass, "watch"))
-            tg.create_task(self._every(DAY, self.metadata_pass, "metadata"))
-            tg.create_task(self._every(DAY, self.backfill_pass, "backfill"))
-            tg.create_task(self._every(DAY, self.seadex_pass, "seadex"))
-            tg.create_task(self._every(DAY, self.mapping_pass, "mapping"))
-            tg.create_task(self._every(DAY, self.nfo_pass, "nfo"))
+            tg.create_task(self._every(DAY, self.metadata_pass, "metadata", first_delay=120))
+            tg.create_task(self._every(DAY, self.backfill_pass, "backfill", first_delay=600))
+            tg.create_task(self._every(DAY, self.seadex_pass, "seadex", first_delay=1200))
+            tg.create_task(self._every(DAY, self.mapping_pass, "mapping", first_delay=60))
+            tg.create_task(self._every(DAY, self.nfo_pass, "nfo", first_delay=1800))

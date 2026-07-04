@@ -63,3 +63,11 @@ ALTER TABLE id_map ADD COLUMN IF NOT EXISTS tmdb_season integer;
 CREATE INDEX IF NOT EXISTS id_map_tmdb_idx ON id_map (tmdb_movie_id);
 
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS source_name text;  -- original release filename (what was downloaded)
+
+-- AniList response cache: FINISHED media is immutable (30d TTL), airing 6h.
+-- This is what keeps franchise walks + nfo passes from hammering the API.
+CREATE TABLE IF NOT EXISTS anilist_cache (
+    anilist_id  integer PRIMARY KEY,
+    payload     jsonb NOT NULL,
+    fetched_at  timestamptz NOT NULL DEFAULT now()
+);

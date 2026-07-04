@@ -129,7 +129,7 @@ def _prequel(media: dict[str, Any]) -> dict | None:
     return None
 
 
-async def franchise(client: httpx.AsyncClient, media: dict[str, Any]) -> dict[str, Any]:
+async def franchise(client: httpx.AsyncClient, media: dict[str, Any], conn=None) -> dict[str, Any]:
     """Walk PREQUEL relations to the franchise root: gives Jellyfin one show
     with one season folder per AniList entry. All AniList data — no TVDB.
 
@@ -147,8 +147,7 @@ async def franchise(client: httpx.AsyncClient, media: dict[str, Any]) -> dict[st
         prev = _prequel(current)
         if prev is None:
             break
-        await asyncio.sleep(1)  # AniList politeness
-        current = await by_id(client, prev["id"])
+        current = await by_id(client, prev["id"], conn)  # throttled + cached
         chain.append(current)
     root = chain[-1]
     if media["format"] in _SERIES_FORMATS:
@@ -163,11 +162,25 @@ async def franchise(client: httpx.AsyncClient, media: dict[str, Any]) -> dict[st
     }
 
 
+# Global pacing: AniList's degraded limit is 30 req/min and repeat offenders
+# get temp IP bans. One lock + minimum spacing across ALL callers (daily loops,
+# franchise walks, seerr adds) keeps us at <=20/min no matter what overlaps.
+_throttle = asyncio.Lock()
+_last_request = 0.0
+_MIN_INTERVAL = 3.0
+
+
 async def _query(client: httpx.AsyncClient, query: str, variables: dict) -> dict:
-    r = await client.post(API, json={"query": query, "variables": variables})
-    if r.status_code == 429:  # AniList rate limit (30/min degraded) — honor and retry once
-        await asyncio.sleep(int(r.headers.get("Retry-After", 60)))
+    global _last_request
+    async with _throttle:
+        wait = _last_request + _MIN_INTERVAL - asyncio.get_event_loop().time()
+        if wait > 0:
+            await asyncio.sleep(wait)
         r = await client.post(API, json={"query": query, "variables": variables})
+        if r.status_code == 429:  # honor Retry-After, retry once
+            await asyncio.sleep(int(r.headers.get("Retry-After", 60)))
+            r = await client.post(API, json={"query": query, "variables": variables})
+        _last_request = asyncio.get_event_loop().time()
     r.raise_for_status()
     return r.json()["data"]
 
@@ -177,6 +190,27 @@ async def search(client: httpx.AsyncClient, term: str) -> list[dict[str, Any]]:
     return [_clean(m) for m in data["Page"]["media"]]
 
 
-async def by_id(client: httpx.AsyncClient, anilist_id: int) -> dict[str, Any]:
+async def by_id(client: httpx.AsyncClient, anilist_id: int, conn=None) -> dict[str, Any]:
+    """Fetch media, via the Postgres cache when a connection is given.
+    FINISHED entries are effectively immutable -> 30 days; airing -> 6 hours."""
+    if conn is not None:
+        cur = await conn.execute(
+            """SELECT payload FROM anilist_cache WHERE anilist_id = %s
+               AND fetched_at > now() - CASE WHEN payload->>'status' = 'FINISHED'
+                   THEN interval '30 days' ELSE interval '6 hours' END""",
+            (anilist_id,),
+        )
+        row = await cur.fetchone()
+        if row:
+            return row["payload"]
     data = await _query(client, _BY_ID, {"id": anilist_id})
-    return _clean(data["Media"])
+    media = _clean(data["Media"])
+    if conn is not None:
+        import json
+
+        await conn.execute(
+            """INSERT INTO anilist_cache (anilist_id, payload, fetched_at) VALUES (%s, %s, now())
+               ON CONFLICT (anilist_id) DO UPDATE SET payload = EXCLUDED.payload, fetched_at = now()""",
+            (anilist_id, json.dumps(media)),
+        )
+    return media

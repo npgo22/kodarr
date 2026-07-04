@@ -30,7 +30,7 @@ async def cmd_add(cfg: Config, args) -> None:
             return
     root = cfg.movie_root if media["format"] == "MOVIE" else cfg.anime_root
     async with httpx.AsyncClient() as http:
-        fr = await anilist.franchise(http, media)
+        fr = await anilist.franchise(http, media, conn)
     if args.show_root or args.season:
         fr = {**fr, **({"show_key": args.show_root} if args.show_root else {}),
               **({"season": args.season} if args.season else {})}

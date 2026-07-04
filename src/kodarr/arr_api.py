@@ -233,8 +233,8 @@ class ArrApi:
                 continue
             if await db.get_series(self.d.conn, r["anilist_id"]):
                 continue
-            media = await anilist.by_id(self.d.http, r["anilist_id"])
-            fr = await anilist.franchise(self.d.http, media)
+            media = await anilist.by_id(self.d.http, r["anilist_id"], self.d.conn)
+            fr = await anilist.franchise(self.d.http, media, self.d.conn)
             root = self.d.cfg.movie_root if media["format"] == "MOVIE" else self.d.cfg.anime_root
             await db.add_series(self.d.conn, {**media, **fr}, root)
             added.append(r["anilist_id"])
@@ -321,8 +321,8 @@ class ArrApi:
     async def _add_movie(self, anilist_id: int, tmdb_id: int) -> None:
         from kodarr import anilist, db
 
-        media = await anilist.by_id(self.d.http, anilist_id)
-        fr = await anilist.franchise(self.d.http, media)
+        media = await anilist.by_id(self.d.http, anilist_id, self.d.conn)
+        fr = await anilist.franchise(self.d.http, media, self.d.conn)
         await db.add_series(self.d.conn, {**media, **fr}, self.d.cfg.movie_root)
         self.d.run_bg(self.d.process_new([anilist_id]))
         log.info("seerr add done", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": anilist_id})
