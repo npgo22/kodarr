@@ -50,6 +50,7 @@ class ParsedRelease:
     group: str | None
     episode: int | None  # None for movies / batches
     season: int | None = None  # release-named cour ("S4", "4th Season"); None if absent
+    resolution: int | None = None  # vertical pixels (1080, 720, ...); None if unnamed
 
 
 def _collapse(value) -> int | None:
@@ -60,6 +61,16 @@ def _collapse(value) -> int | None:
         ints = {int(v) for v in value if str(v).isdigit()}
         return ints.pop() if len(ints) == 1 else None
     return int(value) if value is not None and str(value).isdigit() else None
+
+
+def _resolution(value) -> int | None:
+    """anitopy video_resolution: '1080p', '1920x1080', or a list of those."""
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    m = re.search(r"(\d+)p?$", str(value).lower())
+    return int(m.group(1)) if m else None
 
 
 def parse(release_name: str) -> ParsedRelease | None:
@@ -73,6 +84,7 @@ def parse(release_name: str) -> ParsedRelease | None:
         group=parsed.get("release_group"),
         episode=_collapse(parsed.get("episode_number")),
         season=_collapse(parsed.get("anime_season")),
+        resolution=_resolution(parsed.get("video_resolution")),
     )
 
 

@@ -117,20 +117,21 @@ def test_slime_s1_and_airing_bounds():
     assert match.match(p, SLIME) is None
 
 
-def test_rank_preferred_group_only_usenet_first():
+def test_rank_preferred_group_only_resolution_then_usenet():
     from kodarr.search import rank
 
     results = [
         {"title": "That Time I Got Reincarnated as a Slime S04E06 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", "protocol": "torrent", "url": "u1"},
-        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "torrent", "url": "u2"},
-        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "usenet", "url": "u3"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (720p) [BBBB].mkv", "protocol": "usenet", "url": "u2"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "torrent", "url": "u3"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "usenet", "url": "u4"},
     ]
     ranked = rank(results, SLIME[3], 6)
-    # only the preferred group survives; usenet copy outranks the torrent
-    assert [(s, r["protocol"]) for s, r in ranked] == [(2, "usenet"), (1, "torrent")]
+    # non-preferred group excluded; 1080p beats 720p even over usenet; usenet wins within 1080p
+    assert [r["url"] for _, r in ranked] == ["u4", "u3", "u2"]
     # blocklisted releases drop out entirely
     ranked = rank(results, SLIME[3], 6, {"[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv"})
-    assert ranked == []
+    assert [r["url"] for _, r in ranked] == ["u2"]
 
 
 def test_jellyfin_path_translation():
