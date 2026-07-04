@@ -272,7 +272,9 @@ def add_routes(app: web.Application, daemon, token: str) -> None:
 
     @web.middleware
     async def auth(request, handler):
-        if request.path.startswith("/api/v3") and request.headers.get("X-Api-Key") != token:
+        # real sonarr accepts header or query param; seerr uses ?apikey=
+        got = request.headers.get("X-Api-Key") or request.query.get("apikey")
+        if request.path.startswith("/api/v3") and got != token:
             return web.json_response({"error": "unauthorized"}, status=401)
         return await handler(request)
 
