@@ -73,11 +73,12 @@ def test_digit_title_not_read_as_season():
     assert m and m[0]["anilist_id"] == 116589 and m[1] == 3
 
 
+_S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
 SLIME = [  # real AniList entries (2026-07); the show sonarr-anime misrouted
-    {"anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},
-    {"anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season", "TenSura 2"]},
-    {"anilist_id": 156822, "title": "That Time I Got Reincarnated as a Slime Season 3", "episodes": 24, "aired": 24, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 3rd Season", "Tensura 3"]},
-    {"anilist_id": 182205, "title": "That Time I Got Reincarnated as a Slime Season 4", "episodes": None, "aired": 13, "episode_offset": 0, "synonyms": ["Tensei Shitara Slime Datta Ken 4th Season", "Tensura 4"]},
+    {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},
+    {**_S, "anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season", "TenSura 2"]},
+    {**_S, "anilist_id": 156822, "title": "That Time I Got Reincarnated as a Slime Season 3", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken 3rd Season", "Tensura 3"]},
+    {**_S, "anilist_id": 182205, "title": "That Time I Got Reincarnated as a Slime Season 4", "episodes": None, "aired": 13, "synonyms": ["Tensei Shitara Slime Datta Ken 4th Season", "Tensura 4"]},
 ]
 
 
