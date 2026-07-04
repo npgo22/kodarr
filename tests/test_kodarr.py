@@ -105,6 +105,23 @@ def test_slime_real_release_forms():
         assert m and m[0]["anilist_id"] == 182205 and m[1] == want_ep, f"{name} -> {m}"
 
 
+def test_split_cour_pack_routes_by_offset():
+    # Slime S2 = 12+12 across two AniList entries; pack files say S02E13-24.
+    # Part 2 carries episode_offset=12 so the overflow lands there as 1-12.
+    part1 = {**_S, "anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season"]}
+    part2 = {**part1, "anilist_id": 116742, "episode_offset": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season Part 2"]}
+    rows = [part1, part2]
+    for name, want in [
+        ("That.Time.I.Got.Reincarnated.as.a.Slime.S02E05.1080p.BluRay.Remux-CRUCiBLE.mkv", (108511, 5)),
+        ("That.Time.I.Got.Reincarnated.as.a.Slime.S02E13.1080p.BluRay.Remux-CRUCiBLE.mkv", (116742, 1)),
+        ("That.Time.I.Got.Reincarnated.as.a.Slime.S02E24.1080p.BluRay.Remux-CRUCiBLE.mkv", (116742, 12)),
+    ]:
+        p = match.parse(name)
+        assert p
+        m = match.match(p, rows)
+        assert m and (m[0]["anilist_id"], m[1]) == want, f"{name} -> {m}"
+
+
 def test_slime_s1_and_airing_bounds():
     # season-less S1-era name stays on the S1 entry
     p = match.parse("[SubsPlease] Tensei Shitara Slime Datta Ken - 08 (1080p).mkv")

@@ -115,12 +115,16 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
             continue  # release names a different cour than this entry
         ep = None
         if parsed.episode is not None:
-            # a season-tagged release ("S2 - 04") numbers per cour already;
-            # episode_offset only translates absolute numbering
-            ep = parsed.episode if parsed.season is not None else parsed.episode - row["episode_offset"]
             # while airing, episodes is NULL on AniList — cap at aired+1
             total = row.get("episodes") or (row.get("aired") or 0) + 1
-            if ep < 1 or ep > total:
+            if parsed.season is not None:
+                # season-tagged releases number per cour... except split-cour
+                # packs ("S02E13" of a 12+12 season) — offset covers those
+                candidates = [parsed.episode, parsed.episode - row["episode_offset"]]
+            else:
+                candidates = [parsed.episode - row["episode_offset"]]
+            ep = next((c for c in candidates if 1 <= c <= total), None)
+            if ep is None:
                 continue  # right title, wrong entry (e.g. sequel cour)
         return row, ep
     return None
