@@ -64,6 +64,13 @@ CREATE INDEX IF NOT EXISTS id_map_tmdb_idx ON id_map (tmdb_movie_id);
 
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS source_name text;  -- original release filename (what was downloaded)
 
+-- manual id_map corrections (e.g. TMDB's Monogatari seasons don't line up with
+-- AniList); re-applied after every Fribb refresh so they survive the rewrite
+CREATE TABLE IF NOT EXISTS id_map_overrides (
+    anilist_id  integer PRIMARY KEY,
+    tmdb_season integer                        -- NULL = disable TMDB episode enrichment
+);
+
 -- AniList response cache: FINISHED media is immutable (30d TTL), airing 6h.
 -- This is what keeps franchise walks + nfo passes from hammering the API.
 CREATE TABLE IF NOT EXISTS anilist_cache (

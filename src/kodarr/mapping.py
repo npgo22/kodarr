@@ -46,6 +46,11 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
                    VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
                 rows,
             )
+        # manual corrections survive the rewrite
+        await conn.execute(
+            """UPDATE id_map m SET tmdb_season = o.tmdb_season
+               FROM id_map_overrides o WHERE o.anilist_id = m.anilist_id"""
+        )
     log.info("id mapping refreshed", extra={"event": "mapping_refresh", "rows": len(rows)})
 
 
