@@ -79,6 +79,21 @@ class FakeServices:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if request.url.host == "graphql.anilist.co":
+            import json
+
+            wanted = json.loads(request.read())["variables"]["id"]
+            media = {
+                "id": wanted,
+                "format": "TV",
+                "status": "FINISHED",
+                "episodes": 2,
+                "startDate": {"year": 2023},
+                "title": {"romaji": f"Fake Show {wanted}", "english": None, "native": None},
+                "synonyms": [],
+                "nextAiringEpisode": None,
+            }
+            return httpx.Response(200, json={"data": {"Media": media}})
         if path == "/api/v2/auth/login":
             return httpx.Response(200, text="Ok.")
         if path == "/api/v2/torrents/add":
@@ -196,6 +211,61 @@ def test_stale_grab_expiry(postgres, tmp_path):
         assert [g["release_name"] for g in expired] == ["old release"]
         assert await db.active_grab(conn, 154587, 1) is None
         assert "old release" in await db.failed_release_names(conn, 154587)
+
+    asyncio.run(main())
+
+
+def test_jellyseerr_request_webhook(postgres, tmp_path):
+    """Jellyseerr approval -> tvdb->anilist mapping -> add all season entries -> immediate processing."""
+    from aiohttp.test_utils import TestClient, TestServer
+    from seadex import EntryNotFoundError
+
+    from kodarr import webhook
+
+    class NoSeaDex:
+        def from_id(self, _):
+            raise EntryNotFoundError("not in seadex")
+
+    async def main():
+        conn = await fresh_conn()
+        fake = FakeServices()
+        svc = fake.wire()
+        # preload the id mapping (fresh rows -> no network refresh)
+        await conn.execute(
+            """INSERT INTO id_map (anilist_id, tvdb_id, tvdb_season) VALUES
+               (154587, 424536, 1), (182255, 424536, 2)"""
+        )
+
+        d = object.__new__(daemon_mod.Daemon)
+        d.cfg = SimpleNamespace(dry_run=False, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
+        d.conn, d.http = conn, svc.http
+        d.qbit, d.sab, d.prowlarr, d.jellyfin = svc.qbit, svc.sab, svc.prowlarr, svc.jellyfin
+        d.seadex, d._bg = NoSeaDex(), set()
+
+        app = webhook.make_app(d.handle_autobrr, d.handle_request, "tok")
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        payload = {
+            "notification_type": "MEDIA_AUTO_APPROVED",
+            "subject": "Frieren: Beyond Journey's End",
+            "media": {"media_type": "tv", "tvdbId": "424536", "tmdbId": "209867"},
+        }
+        r = await client.post("/webhook/jellyseerr", json=payload)  # no token -> 401
+        assert r.status == 401
+        r = await client.post("/webhook/jellyseerr", json=payload, headers={"Authorization": "tok"})
+        assert r.status == 200 and (await r.json())["added"] == [154587, 182255]
+
+        rows = await (await conn.execute("SELECT anilist_id, title, root_path FROM series ORDER BY anilist_id")).fetchall()
+        assert [r["anilist_id"] for r in rows] == [154587, 182255]
+        assert all(r["root_path"].endswith("anime") for r in rows)
+
+        await asyncio.gather(*d._bg)  # immediate backfill+seadex kicked off by the request
+        assert await db.searched_recently(conn, 154587), "backfill should have run right away"
+
+        # TEST_NOTIFICATION from jellyseerr's "test" button is acknowledged
+        r = await client.post("/webhook/jellyseerr", json={"notification_type": "TEST_NOTIFICATION"}, headers={"Authorization": "tok"})
+        assert r.status == 200
+        await client.close()
 
     asyncio.run(main())
 

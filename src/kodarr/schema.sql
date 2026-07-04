@@ -41,3 +41,14 @@ CREATE TABLE IF NOT EXISTS grabs (
 );
 
 CREATE INDEX IF NOT EXISTS grabs_active_idx ON grabs (status) WHERE status IN ('queued', 'downloading', 'completed');
+
+-- TVDB/TMDB -> AniList mapping (Fribb/anime-lists), used by the Jellyseerr webhook
+CREATE TABLE IF NOT EXISTS id_map (
+    anilist_id      integer PRIMARY KEY,
+    tvdb_id         integer,
+    tmdb_movie_id   integer,
+    tvdb_season     integer,
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS id_map_tvdb_idx ON id_map (tvdb_id);
+CREATE INDEX IF NOT EXISTS id_map_tmdb_idx ON id_map (tmdb_movie_id);

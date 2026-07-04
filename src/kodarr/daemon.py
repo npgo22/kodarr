@@ -11,7 +11,7 @@ from aiohttp import web
 from psycopg import AsyncConnection
 from seadex import SeaDexEntry
 
-from kodarr import db, grab, importer, rss, search, seadex_sweep, webhook
+from kodarr import anilist, db, grab, importer, mapping, rss, search, seadex_sweep, webhook
 from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
 from kodarr.config import Config
 
@@ -31,6 +31,7 @@ class Daemon:
         self.jellyfin = Jellyfin(self.http, cfg.jellyfin_url, cfg.jellyfin_api_key)
         self.seadex = SeaDexEntry()
         self.rss_cache: dict[str, dict[str, str]] = {}
+        self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive
 
     async def _every(self, seconds: int, fn, name: str) -> None:
         while True:
@@ -81,8 +82,6 @@ class Daemon:
         await db.set_grab_status(self.conn, g["id"], "imported" if n else "failed")
 
     async def metadata_pass(self) -> None:
-        from kodarr import anilist
-
         for s in await db.monitored_series(self.conn):
             if s["status"] == "FINISHED":
                 continue
@@ -111,8 +110,41 @@ class Daemon:
             self.conn, self.qbit, release_name, download_url, "autobrr", dry_run=self.cfg.dry_run
         )
 
+    async def handle_request(self, media_type: str, tvdb_id: int | None, tmdb_id: int | None) -> list[int]:
+        """Jellyseerr approved a request: map to AniList, add, and process now."""
+        added = []
+        for anilist_id in await mapping.anilist_ids(self.conn, self.http, media_type, tvdb_id, tmdb_id):
+            media = await anilist.by_id(self.http, anilist_id)
+            root = self.cfg.movie_root if media["format"] == "MOVIE" else self.cfg.anime_root
+            await db.add_series(self.conn, media, root)
+            added.append(anilist_id)
+            log.info(
+                "request added",
+                extra={"event": "request", "anilist_id": anilist_id, "series": media["title"]},
+            )
+        if added:
+            t = asyncio.create_task(self._process_new(added))
+            self._bg.add(t)
+            t.add_done_callback(self._bg.discard)
+        return added
+
+    async def _process_new(self, anilist_ids: list[int]) -> None:
+        """Backfill + seadex sweep for freshly requested series, without waiting for the daily loops."""
+        for anilist_id in anilist_ids:
+            s = await db.get_series(self.conn, anilist_id)
+            if s is None:
+                continue
+            try:
+                await search.backfill_series(self.conn, self.prowlarr, self.qbit, self.sab, s, dry_run=self.cfg.dry_run)
+                await seadex_sweep.sweep_series(self.conn, self.seadex, self.prowlarr, self.qbit, self.sab, s, dry_run=self.cfg.dry_run)
+            except Exception:
+                log.exception("processing new request failed", extra={"event": "error", "anilist_id": anilist_id})
+
+    async def mapping_pass(self) -> None:
+        await mapping.refresh_if_stale(self.conn, self.http)
+
     async def run(self) -> None:
-        app = webhook.make_app(self.handle_autobrr, self.cfg.webhook_token)
+        app = webhook.make_app(self.handle_autobrr, self.handle_request, self.cfg.webhook_token)
         runner = web.AppRunner(app)
         await runner.setup()
         await web.TCPSite(runner, port=self.cfg.webhook_port).start()
@@ -123,3 +155,4 @@ class Daemon:
             tg.create_task(self._every(DAY, self.metadata_pass, "metadata"))
             tg.create_task(self._every(DAY, self.backfill_pass, "backfill"))
             tg.create_task(self._every(DAY, self.seadex_pass, "seadex"))
+            tg.create_task(self._every(DAY, self.mapping_pass, "mapping"))

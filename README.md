@@ -7,6 +7,8 @@ release group, and absolute episode number, so that's all kodarr models.
 ## Features
 
 - **AniList** as the only metadata source; TV and movies, one library entry per AniList ID
+- Add anime via CLI or **Jellyseerr requests** (webhook; TVDB/TMDB → AniList via Fribb/anime-lists,
+  one request adds every season's AniList entry and processes it immediately)
 - **RSS** (SubsPlease) + **autobrr** (webhook) for airing episodes, preferred release group only
 - **Prowlarr** backfill for missing episodes — usenet preferred, except preferred-group torrents
 - **SeaDex** sweep auto-upgrades finished series to the curated best public release
@@ -31,6 +33,12 @@ Also: `list`, `remove`, `backfill`, `seadex [--force]`, `import <path> [--seadex
 **autobrr**: Webhook action → `POST http://kodarr:7878/webhook/autobrr` with header
 `X-Kodarr-Token: <token>` and payload
 `{"release_name": "{{ .TorrentName }}", "download_url": "{{ .TorrentUrl }}"}`.
+
+**Jellyseerr**: Settings → Notifications → Webhook: URL
+`http://kodarr:7878/webhook/jellyseerr`, Authorization Header = your token,
+default JSON payload, enable "Request Approved" + "Request Automatically
+Approved". Approved anime requests land in the library and are searched
+immediately.
 
 ## Deploy
 
