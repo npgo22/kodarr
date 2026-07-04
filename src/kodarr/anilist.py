@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 import httpx
@@ -17,6 +18,13 @@ _MEDIA_FIELDS = """
     startDate { year }
     title { romaji english native }
     synonyms
+    description(asHtml: false)
+    averageScore
+    genres
+    coverImage { extraLarge }
+    bannerImage
+    studios(isMain: true) { nodes { name } }
+    streamingEpisodes { title thumbnail }
     nextAiringEpisode { episode airingAt }
     relations { edges { relationType node { id format title { romaji english } startDate { year } } } }
 """
@@ -45,6 +53,13 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
         "aired": aired,
         "status": media["status"],
         "synonyms": list(dict.fromkeys(names + (media.get("synonyms") or []))),
+        "description": media.get("description") or "",
+        "score": media.get("averageScore"),
+        "genres": media.get("genres") or [],
+        "cover_url": (media.get("coverImage") or {}).get("extraLarge"),
+        "banner_url": media.get("bannerImage"),
+        "studio": next((s["name"] for s in (media.get("studios") or {}).get("nodes", [])), None),
+        "episode_titles": _episode_titles(media.get("streamingEpisodes") or []),
         "relations": [
             {
                 "type": e["relationType"],
@@ -56,6 +71,19 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
             for e in (media.get("relations") or {}).get("edges", [])
         ],
     }
+
+
+_EP_TITLE = re.compile(r"^Episode (\d+) - (.+)$")  # decimals ("Episode 5.5 - Recap") intentionally don't match
+
+
+def _episode_titles(streaming: list[dict]) -> dict[int, str]:
+    """CR-sourced streamingEpisodes titles: 'Episode 5 - The Title' -> {5: 'The Title'}."""
+    out = {}
+    for ep in streaming:
+        m = _EP_TITLE.match(ep.get("title") or "")
+        if m:
+            out[int(m.group(1))] = m.group(2)
+    return out
 
 
 def _prequel(media: dict[str, Any]) -> dict | None:

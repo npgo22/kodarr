@@ -11,7 +11,7 @@ from aiohttp import web
 from psycopg import AsyncConnection
 from seadex import SeaDexEntry
 
-from kodarr import anilist, db, grab, importer, mapping, rss, search, seadex_sweep, webhook
+from kodarr import anilist, db, grab, importer, mapping, nfo, rss, search, seadex_sweep, webhook
 from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
 from kodarr.config import Config
 
@@ -152,6 +152,10 @@ class Daemon:
     async def mapping_pass(self) -> None:
         await mapping.refresh_if_stale(self.conn, self.http)
 
+    async def nfo_pass(self) -> None:
+        # picks up newly-published episode titles/art for airing shows
+        await nfo.refresh_all(self.conn, self.http)
+
     async def run(self) -> None:
         app = webhook.make_app(self.handle_autobrr, self.handle_request, self.cfg.webhook_token)
         runner = web.AppRunner(app, access_log=None)  # healthz probes would spam the log pipeline
@@ -165,3 +169,4 @@ class Daemon:
             tg.create_task(self._every(DAY, self.backfill_pass, "backfill"))
             tg.create_task(self._every(DAY, self.seadex_pass, "seadex"))
             tg.create_task(self._every(DAY, self.mapping_pass, "mapping"))
+            tg.create_task(self._every(DAY, self.nfo_pass, "nfo"))

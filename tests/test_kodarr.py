@@ -248,6 +248,57 @@ def test_dest_path_movie():
     assert d == Path("/data/media/anime-movies/Suzume (2022) [anilist-142770]/Suzume (2022) [SubsPlease].mkv")
 
 
+def test_nfo_writes(tmp_path):
+    import asyncio
+    import xml.etree.ElementTree as ET
+
+    import httpx
+
+    from kodarr import nfo
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"jpegbytes")
+
+    media = {"anilist_id": 154587, "title": "Frieren: Beyond Journey's End", "year": 2023,
+             "description": "Elf & friends.", "score": 89, "genres": ["Adventure", "Fantasy"],
+             "studio": "Madhouse", "cover_url": "https://s4.anilist.co/cover.jpg",
+             "banner_url": "https://s4.anilist.co/banner.jpg", "episode_titles": {1: "The Journey's End"}}
+    series = {**FRIEREN, "root_path": str(tmp_path), "show_title": media["title"],
+              "show_key": 154587, "show_year": 2023, "season": 1}
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        from kodarr import organize
+        await nfo.write_show(http, organize.series_dir(series).parent, media)
+        await nfo.write_season(http, series, media)
+        vid = organize.series_dir(series) / "x S01E001.mkv"
+        vid.write_bytes(b"v")
+        nfo.write_episode(vid, series, 1, media["episode_titles"][1])
+
+    asyncio.run(main())
+    show_dir = tmp_path / "Frieren Beyond Journey's End (2023) [anilist-154587]"
+    tv = ET.parse(show_dir / "tvshow.nfo").getroot()
+    assert tv.findtext("title") == "Frieren: Beyond Journey's End"
+    assert tv.findtext("rating") == "8.9"
+    assert tv.find("uniqueid").text == "154587"
+    assert (show_dir / "poster.jpg").read_bytes() == b"jpegbytes"
+    season = ET.parse(show_dir / "Season 01" / "season.nfo").getroot()
+    assert season.findtext("seasonnumber") == "1"
+    ep = ET.parse(show_dir / "Season 01" / "x S01E001.nfo").getroot()
+    assert ep.findtext("title") == "The Journey's End" and ep.findtext("episode") == "1"
+
+
+def test_episode_title_parsing():
+    from kodarr.anilist import _episode_titles
+
+    titles = _episode_titles([
+        {"title": "Episode 5 - The Master of Greed", "thumbnail": "x"},
+        {"title": "Episode 5.5 - Recap", "thumbnail": "x"},
+        {"title": "Some Movie Title", "thumbnail": "x"},
+    ])
+    assert titles == {5: "The Master of Greed"}
+
+
 def test_import_hardlink_and_replace(tmp_path):
     src = tmp_path / "dl" / "ep.mkv"
     src.parent.mkdir()

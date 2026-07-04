@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from kodarr import anilist, db, importer, log, search, seadex_sweep
+from kodarr import anilist, db, importer, log, nfo, search, seadex_sweep
 from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
 from kodarr.config import Config, load
 
@@ -101,6 +101,13 @@ async def cmd_seadex(cfg: Config, args) -> None:
         await seadex_sweep.sweep_all(conn, SeaDexEntry(), prowlarr, qbit, sab, dry_run=args.dry_run, force=args.force)
 
 
+async def cmd_nfo(cfg: Config, args) -> None:
+    conn = await db.connect(cfg.db_dsn)
+    async with httpx.AsyncClient(follow_redirects=True) as http:
+        await nfo.refresh_all(conn, http)
+    print("nfo refresh complete")
+
+
 async def cmd_run(cfg: Config, args) -> None:
     from kodarr.daemon import Daemon
 
@@ -142,6 +149,8 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--force", action="store_true", help="re-check series already fully on seadex releases")
     p.set_defaults(fn=cmd_seadex)
+
+    sub.add_parser("nfo", help="write NFO metadata + artwork for the whole library").set_defaults(fn=cmd_nfo)
 
     p = sub.add_parser("run", help="run the daemon")
     p.add_argument("--dry-run", action="store_true", help="log intended grabs, send nothing")
