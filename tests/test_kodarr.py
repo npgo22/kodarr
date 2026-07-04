@@ -127,11 +127,11 @@ def test_rank_preferred_group_only_resolution_then_usenet():
         {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "usenet", "url": "u4"},
     ]
     ranked = rank(results, SLIME[3], 6)
-    # non-preferred group excluded; 1080p beats 720p even over usenet; usenet wins within 1080p
-    assert [r["url"] for _, r in ranked] == ["u4", "u3", "u2"]
-    # blocklisted releases drop out entirely
+    # non-preferred group excluded; sub-1080p excluded outright; usenet wins within 1080p
+    assert [r["url"] for _, r in ranked] == ["u4", "u3"]
+    # blocklisted releases drop out entirely — and nothing below the floor backfills
     ranked = rank(results, SLIME[3], 6, {"[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv"})
-    assert [r["url"] for _, r in ranked] == ["u2"]
+    assert ranked == []
 
 
 def test_jellyfin_path_translation():

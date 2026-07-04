@@ -61,8 +61,13 @@ class Sab:
         return ids[0] if ids else None
 
     async def history(self) -> list[dict[str, Any]]:
-        """[{nzo_id, name, status, path}] — status Completed|Failed."""
-        data = await self._api(mode="history", cat=self.category, limit=50)
+        """[{nzo_id, name, status, path}] — status Completed|Failed.
+
+        No category filter: SAB silently files jobs under cat=* when the
+        category doesn't exist in its config, which made a filtered query
+        return nothing forever. The watcher matches by nzo_id anyway.
+        """
+        data = await self._api(mode="history", limit=50)
         return [
             {"nzo_id": s["nzo_id"], "name": s["name"], "status": s["status"], "path": s.get("storage")}
             for s in data["history"]["slots"]

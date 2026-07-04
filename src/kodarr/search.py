@@ -37,8 +37,10 @@ def rank(
         _, ep = m
         if series["format"] != "MOVIE" and ep != want_ep:
             continue
-        # resolution dominates transport: a 1080p torrent beats a 720p nzb
-        scored.append(((parsed.resolution or 0, 1 if res["protocol"] == "usenet" else 0), res))
+        if (parsed.resolution or 0) < 1080:
+            continue  # 1080p is the floor, never grab less
+        # resolution dominates transport: a 2160p torrent beats a 1080p nzb
+        scored.append(((parsed.resolution, 1 if res["protocol"] == "usenet" else 0), res))
     scored.sort(key=lambda s: s[0], reverse=True)
     return scored
 
