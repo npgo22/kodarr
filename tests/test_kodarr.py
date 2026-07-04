@@ -197,6 +197,50 @@ def test_dest_path_franchise_season():
         "/data/media/anime/Frieren Beyond Journey's End (2023) [anilist-154587]/"
         "Season 02/Frieren Beyond Journey's End S02E004 [SubsPlease].mkv"
     )
+    # specials entries go to Season 00, not Season 01
+    ova = {**cour2, "format": "OVA", "season": 0}
+    d = organize.dest_path(ova, 2, "Mehul", ".mkv")
+    assert d.parent.name == "Season 00" and d.name.startswith("Frieren Beyond Journey's End S00E002")
+
+
+def test_franchise_walk_through_ova():
+    """Slime's real chain: S2's prequel is the Coleus OVA, whose prequel is S1.
+    The walk must hop the OVA; the OVA itself is Season 00."""
+    import asyncio
+    import json
+
+    import httpx
+
+    from kodarr import anilist
+
+    def rel(type_, id_, fmt):
+        return {"relationType": type_, "node": {"id": id_, "format": fmt, "title": {"romaji": f"n{id_}", "english": None}, "startDate": {"year": 2018}}}
+
+    graph = {
+        101280: [],
+        161802: [rel("PREQUEL", 101280, "TV")],
+        108511: [rel("PREQUEL", 161802, "OVA")],
+        116742: [rel("PREQUEL", 108511, "TV")],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        aid = json.loads(request.read())["variables"]["id"]
+        media = {"id": aid, "format": "OVA" if aid == 161802 else "TV", "status": "FINISHED", "episodes": 12,
+                 "startDate": {"year": 2018}, "title": {"romaji": f"n{aid}", "english": None, "native": None},
+                 "synonyms": [], "nextAiringEpisode": None,
+                 "relations": {"edges": graph[aid]}}
+        return httpx.Response(200, json={"data": {"Media": media}})
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        s2p2 = await anilist.by_id(http, 116742)
+        fr = await anilist.franchise(http, s2p2)
+        assert fr["show_key"] == 101280 and fr["season"] == 3, fr  # S1, S2, S2P2
+        ova = await anilist.by_id(http, 161802)
+        fr = await anilist.franchise(http, ova)
+        assert fr["show_key"] == 101280 and fr["season"] == 0, fr
+
+    asyncio.run(main())
 
 
 def test_dest_path_movie():

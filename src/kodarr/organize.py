@@ -30,7 +30,8 @@ def series_dir(series: dict[str, Any]) -> Path:
     show = Path(series["root_path"]) / f"{title}{year} [anilist-{key}]"
     if series["format"] == "MOVIE":
         return show
-    return show / f"Season {series.get('season') or 1:02d}"
+    season = series.get("season")
+    return show / f"Season {season if season is not None else 1:02d}"
 
 
 def dest_path(series: dict[str, Any], episode: int | None, group: str | None, ext: str) -> Path:
@@ -41,7 +42,8 @@ def dest_path(series: dict[str, Any], episode: int | None, group: str | None, ex
         year = f" ({year_val})" if year_val else ""
         name = f"{title}{year}{grp}{ext}"
     else:
-        name = f"{title} S{series.get('season') or 1:02d}E{episode:03d}{grp}{ext}"
+        season = series.get("season")
+        name = f"{title} S{season if season is not None else 1:02d}E{episode:03d}{grp}{ext}"
     return series_dir(series) / name
 
 

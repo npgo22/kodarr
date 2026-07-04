@@ -59,8 +59,10 @@ def _clean(media: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prequel(media: dict[str, Any]) -> dict | None:
+    # any format: cours are sometimes chained THROUGH an OVA/special
+    # (Slime S1 <- Visions of Coleus OVA <- S2), so the walk must not skip them
     for rel in media["relations"]:
-        if rel["type"] == "PREQUEL" and rel["format"] in _SERIES_FORMATS:
+        if rel["type"] == "PREQUEL" and rel["format"] != "MOVIE":
             return rel
     return None
 
@@ -69,9 +71,10 @@ async def franchise(client: httpx.AsyncClient, media: dict[str, Any]) -> dict[st
     """Walk PREQUEL relations to the franchise root: gives Jellyfin one show
     with one season folder per AniList entry. All AniList data — no TVDB.
 
-    Returns {show_key, show_title, show_year, season} (season = 1-based
-    position in the prequel chain). Movies and rootless entries are their
-    own show at season 1.
+    Season = 1 + how many series-format (TV/ONA) entries precede this one in
+    the chain. OVA/special entries land in Season 00.
+    # ponytail: two specials entries in one franchise would collide in S00
+    # numbering — split with --show-root/--season overrides if that ever happens.
     """
     if media["format"] == "MOVIE":
         return {"show_key": media["anilist_id"], "show_title": media["title"],
@@ -86,11 +89,15 @@ async def franchise(client: httpx.AsyncClient, media: dict[str, Any]) -> dict[st
         current = await by_id(client, prev["id"])
         chain.append(current)
     root = chain[-1]
+    if media["format"] in _SERIES_FORMATS:
+        season = 1 + sum(1 for m in chain[1:] if m["format"] in _SERIES_FORMATS)
+    else:
+        season = 0  # specials
     return {
         "show_key": root["anilist_id"],
         "show_title": root["title"],
         "show_year": root["year"],
-        "season": len(chain),
+        "season": season,
     }
 
 
