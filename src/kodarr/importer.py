@@ -45,6 +45,11 @@ async def import_path(
 
         row, episode = series, None
         if row is not None:
+            if parsed.season == 0:
+                # S00 extras inside a season pack belong to a different AniList
+                # entry (specials are their own entry) — never this one
+                log.info("skip pack special", extra={"event": "skip", "file": src.name})
+                continue
             if parsed.episode is not None:
                 episode = parsed.episode - row["episode_offset"]
         else:
