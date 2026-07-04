@@ -1,0 +1,98 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/app-template-5.0.1/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kodarr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: kodarr
+  dependsOn:
+    - name: prowlarr
+    - name: qbittorrent
+    - name: sabnzbd
+  interval: 30m
+  values:
+    controllers:
+      kodarr:
+        # Deployment, not statefulset: all state lives in Postgres.
+        annotations:
+          secret.reloader.stakater.com/reload: &secret kodarr-secret
+        initContainers:
+          01-init-db:
+            image:
+              repository: ghcr.io/home-operations/postgres-init
+              tag: 18.4
+            envFrom:
+              - secretRef:
+                  name: *secret
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 568
+            runAsGroup: 5000
+            fsGroup: 5000
+            fsGroupChangePolicy: OnRootMismatch
+        containers:
+          app:
+            image:
+              repository: ghcr.io/npgo22/kodarr
+              tag: latest
+            env:
+              TZ: ${CONFIG_TIMEZONE}
+              KODARR_CONFIG: /config/config.toml
+            envFrom:
+              # KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_PROWLARR_API_KEY,
+              # KODARR_SAB_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS, KODARR_WEBHOOK_TOKEN
+              - secretRef:
+                  name: *secret
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: &port 7878
+                  periodSeconds: 10
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+    service:
+      app:
+        controller: kodarr
+        annotations:
+          gatus.home-operations.com/endpoint: |-
+            group: downloads
+            url: http://kodarr.downloads:7878/healthz
+            interval: 1m
+            conditions:
+              - "[STATUS] == 200"
+            alerts:
+              - type: discord
+                send-on-resolved: true
+        ports:
+          http:
+            port: *port
+    persistence:
+      config-file:
+        type: configMap
+        name: kodarr-config
+        globalMounts:
+          - path: /config/config.toml
+            subPath: config.toml
+            readOnly: true
+      media:
+        existingClaim: downloads-pvc
+        globalMounts:
+          - path: /data

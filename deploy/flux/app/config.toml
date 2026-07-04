@@ -1,0 +1,31 @@
+# kodarr in-cluster config. Secrets come from kodarr-secret via env
+# (KODARR_DB_DSN, KODARR_*_API_KEY, KODARR_QBIT_*, KODARR_WEBHOOK_TOKEN).
+
+[paths]
+anime_root = "/data/media/anime"
+movie_root = "/data/media/anime-movies"
+downloads = "/data/downloads"
+
+[jellyfin]
+url = "http://jellyfin.media.svc.cluster.local:8096"
+
+[prowlarr]
+url = "http://prowlarr.downloads.svc.cluster.local"
+
+[sabnzbd]
+url = "http://sabnzbd.downloads.svc.cluster.local"
+category = "kodarr"
+
+[qbittorrent]
+url = "http://qbittorrent.downloads.svc.cluster.local"
+category = "kodarr"
+
+[rss]
+feeds = ["https://subsplease.org/rss/?r=1080"]
+interval = 600
+
+[groups]
+preferred = ["SubsPlease"]
+
+[webhook]
+port = 7878

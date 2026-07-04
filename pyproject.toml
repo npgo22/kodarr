@@ -1,0 +1,26 @@
+[project]
+name = "kodarr"
+version = "0.1.0"
+description = "Anime-only Sonarr replacement: AniList metadata, SeaDex upgrades, Postgres state, no web UI"
+readme = "README.md"
+authors = [
+    { name = "Nolan Poe", email = "npgo22@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.14.1",
+    "anitopy>=2.1.1",
+    "httpx>=0.28.1",
+    "psycopg[binary]>=3.3.4",
+    "seadex>=0.7.2",
+]
+
+[project.scripts]
+kodarr = "kodarr.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12.0"]
+build-backend = "uv_build"

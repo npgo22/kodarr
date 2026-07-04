@@ -1,0 +1,42 @@
+# kodarr configuration. Secrets may instead come from env:
+# KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_PROWLARR_API_KEY,
+# KODARR_SAB_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS, KODARR_WEBHOOK_TOKEN
+
+[db]
+dsn = "postgresql://kodarr:secret@postgres-rw.database.svc:5432/kodarr"
+
+[paths]
+anime_root = "/data/media/anime"
+movie_root = "/data/media/anime-movies"
+downloads = "/data/downloads"
+
+[jellyfin]
+url = "http://jellyfin.media.svc:8096"
+api_key = ""
+
+[prowlarr]
+url = "http://prowlarr.downloads.svc"
+api_key = ""
+
+[sabnzbd]
+url = "http://sabnzbd.downloads.svc"
+api_key = ""
+category = "kodarr"
+
+[qbittorrent]
+url = "http://qbittorrent.downloads.svc"
+user = "admin"
+pass = ""
+category = "kodarr"
+
+[rss]
+feeds = ["https://subsplease.org/rss/?r=1080"]
+interval = 600
+
+[groups]
+# groups whose torrents beat usenet (currently-airing simulcast groups)
+preferred = ["SubsPlease"]
+
+[webhook]
+port = 7878
+token = ""

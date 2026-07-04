@@ -1,0 +1,125 @@
+---
+# yaml-language-server: $schema=https://crd.movishell.pl/grafana.integreatly.org/grafanadashboard_v1beta1.json
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: kodarr
+spec:
+  allowCrossNamespaceImport: true
+  datasources:
+    - datasourceName: VictoriaLogs
+      inputName: DS_VICTORIALOGS
+  folder: Downloads
+  instanceSelector:
+    matchLabels:
+      grafana.internal/instance: grafana
+  json: |
+    {
+      "__inputs": [
+        {
+          "name": "DS_VICTORIALOGS",
+          "label": "VictoriaLogs",
+          "type": "datasource",
+          "pluginId": "victoriametrics-logs-datasource"
+        }
+      ],
+      "title": "kodarr",
+      "uid": "kodarr",
+      "tags": ["downloads", "anime"],
+      "timezone": "browser",
+      "time": { "from": "now-7d", "to": "now" },
+      "refresh": "1m",
+      "schemaVersion": 39,
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Grabs by source",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "statsRange",
+              "expr": "logger:kodarr event:grab | stats by (source) count()"
+            }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Imports and upgrades",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "statsRange",
+              "expr": "logger:kodarr event:(import OR upgrade) | stats by (event) count()"
+            }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Errors",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            { "refId": "A", "queryType": "stats", "expr": "logger:kodarr level:error | stats count()" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "SeaDex upgrades",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            { "refId": "A", "queryType": "stats", "expr": "logger:kodarr event:grab source:seadex | stats count()" }
+          ],
+          "fieldConfig": { "defaults": {}, "overrides": [] }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Match failures (unparseable / unknown releases)",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            { "refId": "A", "queryType": "statsRange", "expr": "logger:kodarr event:match_fail | stats count()" }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] }
+        },
+        {
+          "id": 6,
+          "type": "logs",
+          "title": "Grab / import activity",
+          "gridPos": { "h": 10, "w": 12, "x": 0, "y": 14 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            { "refId": "A", "queryType": "instant", "expr": "logger:kodarr event:(grab OR import OR upgrade OR replace)" }
+          ],
+          "options": { "showTime": true, "sortOrder": "Descending" }
+        },
+        {
+          "id": 7,
+          "type": "logs",
+          "title": "Warnings and errors",
+          "gridPos": { "h": 10, "w": 12, "x": 12, "y": 14 },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}" },
+          "targets": [
+            { "refId": "A", "queryType": "instant", "expr": "logger:kodarr level:(error OR warning)" }
+          ],
+          "options": { "showTime": true, "sortOrder": "Descending" }
+        }
+      ]
+    }
