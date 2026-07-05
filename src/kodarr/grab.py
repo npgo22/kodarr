@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 
@@ -69,5 +70,7 @@ async def consider(
     # non-magnet grabs fall back to name matching
     m = re.search(r"btih:([^&]+)", download_url)
     infohash = m.group(1).lower() if m else None
+    if infohash and len(infohash) == 32:  # base32 magnet (SubsPlease RSS) -> hex, as qbit reports it
+        infohash = base64.b32decode(infohash.upper()).hex()
     await db.insert_grab(conn, series["anilist_id"], abs_num, source, "qbittorrent", infohash, release_name)
     return True

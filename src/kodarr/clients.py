@@ -40,6 +40,18 @@ class Qbit:
             if e.response.status_code != 409:  # 409 = torrent already in client
                 raise
 
+    async def by_hashes(self, hashes: list[str]) -> list[dict[str, Any]]:
+        """Done torrents matching these hashes, regardless of category —
+        a release autobrr/cross-seed added first lives outside ours."""
+        if not hashes:
+            return []
+        r = await self._post("/api/v2/torrents/info", {"hashes": "|".join(hashes)})
+        return [
+            {"hash": t["hash"], "name": t["name"], "path": t["content_path"]}
+            for t in r.json()
+            if t["state"] in _QBIT_DONE or t["progress"] == 1
+        ]
+
     async def completed(self) -> list[dict[str, Any]]:
         """[{hash, name, content_path}] for finished torrents in our category."""
         r = await self._post("/api/v2/torrents/info", {"category": self.category})

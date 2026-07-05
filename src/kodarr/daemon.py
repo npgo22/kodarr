@@ -67,6 +67,12 @@ class Daemon:
                 )
                 if g:
                     await self._finish(g, Path(t["path"]))
+            # grabs whose torrent lives outside our category (autobrr added it
+            # first; our duplicate add 409'd) — find them by infohash
+            remaining = await db.grabs_in_flight(self.conn)
+            by_hash = {g["client_id"]: g for g in remaining if g["client_id"] and len(g["client_id"]) == 40}
+            for t in await self.qbit.by_hashes(list(by_hash)):
+                await self._finish(by_hash[t["hash"]], Path(t["path"]))
     async def _finish(self, g: dict, path: Path) -> None:
         series = await db.get_series(self.conn, g["anilist_id"])
         n = await importer.import_path(
