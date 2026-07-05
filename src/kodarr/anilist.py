@@ -130,6 +130,25 @@ def _prequel(media: dict[str, Any]) -> dict | None:
     return None
 
 
+async def franchise_members(client: httpx.AsyncClient, media: dict[str, Any], conn) -> list[dict[str, Any]]:
+    """Every entry in the franchise: walk to the prequel root, then follow all
+    SEQUEL edges forward. Movies and OVAs are members too — a request for any
+    season should bring the whole franchise, not just TVDB-shaped seasons."""
+    root_fr = await franchise(client, media, conn)
+    root = await by_id(client, root_fr["show_key"], conn)
+    seen: dict[int, dict] = {root["anilist_id"]: root}
+    queue = [root]
+    while queue and len(seen) < 30:  # ponytail: cap walks on pathological graphs
+        current = queue.pop(0)
+        for rel in current["relations"]:
+            if rel["type"] != "SEQUEL" or rel["id"] in seen:
+                continue
+            entry = await by_id(client, rel["id"], conn)
+            seen[entry["anilist_id"]] = entry
+            queue.append(entry)
+    return list(seen.values())
+
+
 async def franchise(client: httpx.AsyncClient, media: dict[str, Any], conn=None) -> dict[str, Any]:
     """Walk PREQUEL relations to the franchise root: gives Jellyfin one show
     with one season folder per AniList entry. All AniList data — no TVDB.

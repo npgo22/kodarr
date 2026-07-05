@@ -181,26 +181,30 @@ class ArrApi:
         )
 
     async def _add_tvdb_seasons(self, tvdb_id: int, seasons: set[int]) -> list[int]:
+        """Add the WHOLE franchise for any requested tvdb id. TVDB's season
+        model drops anime content on the floor (Monogatari's Neko Black/
+        Tsuki/Koyomi live in "specials", movies are separate records), so the
+        requested-season list is treated as "the user wants this franchise":
+        every AniList chain member is added — TV entries as seasons, movies
+        into the movie library."""
         from kodarr import anilist, db
 
         cur = await self.d.conn.execute(
-            "SELECT anilist_id, tvdb_season FROM id_map WHERE tvdb_id = %s AND tvdb_season > 0", (tvdb_id,)
+            "SELECT anilist_id FROM id_map WHERE tvdb_id = %s AND tvdb_season > 0 ORDER BY tvdb_season LIMIT 1",
+            (tvdb_id,),
         )
-        rows = await cur.fetchall()
-        # one batched query warms the cache for every season of the franchise,
-        # so the per-entry franchise walks below are (mostly) API-free
-        await anilist.by_ids(self.d.http, [r["anilist_id"] for r in rows], self.d.conn)
+        row = await cur.fetchone()
+        if row is None:
+            return []
+        media = await anilist.by_id(self.d.http, row["anilist_id"], self.d.conn)
         added = []
-        for r in rows:
-            if seasons and r["tvdb_season"] not in seasons:
+        for member in await anilist.franchise_members(self.d.http, media, self.d.conn):
+            if await db.get_series(self.d.conn, member["anilist_id"]):
                 continue
-            if await db.get_series(self.d.conn, r["anilist_id"]):
-                continue
-            media = await anilist.by_id(self.d.http, r["anilist_id"], self.d.conn)
-            fr = await anilist.franchise(self.d.http, media, self.d.conn)
-            root = self.d.cfg.movie_root if media["format"] == "MOVIE" else self.d.cfg.anime_root
-            await db.add_series(self.d.conn, {**media, **fr}, root)
-            added.append(r["anilist_id"])
+            fr = await anilist.franchise(self.d.http, member, self.d.conn)
+            root = self.d.cfg.movie_root if member["format"] == "MOVIE" else self.d.cfg.anime_root
+            await db.add_series(self.d.conn, {**member, **fr}, root)
+            added.append(member["anilist_id"])
         if added:
             self.d.run_bg(self.d.process_new(added))
         log.info("seerr add done", extra={"event": "request", "tvdb": tvdb_id, "added": added})

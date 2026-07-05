@@ -340,3 +340,40 @@ def test_mushoku_short_title_matching():
     assert p and p.season is None
     m = match.match(p, [s3, s1])  # s3 listed first on purpose
     assert m and m[0]["anilist_id"] == 108465
+
+
+def test_franchise_members_includes_movies_and_specials():
+    """Requesting any entry must enumerate the whole chain: TV cours, the OVA
+    hop, and movies (TVDB's season shape drops those — the Monogatari lesson)."""
+    import asyncio
+    import json
+
+    import httpx
+
+    from kodarr import anilist
+
+    def rel(type_, id_, fmt):
+        return {"relationType": type_, "node": {"id": id_, "format": fmt, "title": {"romaji": f"n{id_}", "english": None}, "startDate": {"year": 2020}}}
+
+    graph = {  # 1 (TV root) -> 2 (movie) -> 3 (TV); root also sequels to 4 (OVA)
+        1: {"fmt": "TV", "rels": [rel("SEQUEL", 2, "MOVIE"), rel("SEQUEL", 4, "OVA")]},
+        2: {"fmt": "MOVIE", "rels": [rel("PREQUEL", 1, "TV"), rel("SEQUEL", 3, "TV")]},
+        3: {"fmt": "TV", "rels": [rel("PREQUEL", 2, "MOVIE")]},
+        4: {"fmt": "OVA", "rels": [rel("PREQUEL", 1, "TV")]},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        aid = json.loads(request.read())["variables"]["id"]
+        g = graph[aid]
+        media = {"id": aid, "format": g["fmt"], "status": "FINISHED", "episodes": 12,
+                 "startDate": {"year": 2020}, "title": {"romaji": f"n{aid}", "english": None, "native": None},
+                 "synonyms": [], "nextAiringEpisode": None, "relations": {"edges": g["rels"]}}
+        return httpx.Response(200, json={"data": {"Media": media}})
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        s3 = await anilist.by_id(http, 3)
+        members = await anilist.franchise_members(http, s3, None)
+        assert sorted(m["anilist_id"] for m in members) == [1, 2, 3, 4]
+
+    asyncio.run(main())
