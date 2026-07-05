@@ -79,7 +79,8 @@ class Daemon:
         try:
             series = await db.get_series(self.conn, g["anilist_id"])
             n = await importer.import_path(
-                self.conn, self.jellyfin, path, series=series, from_seadex=g["source"] == "seadex"
+                self.conn, self.jellyfin, path, http=self.http,
+                series=series, from_seadex=g["source"] == "seadex"
             )
         except Exception:
             log.exception("import failed", extra={"event": "error", "release": g["release_name"]})

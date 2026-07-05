@@ -8,7 +8,9 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from kodarr import db, match, nfo, organize
+import httpx
+
+from kodarr import anilist, db, match, nfo, organize
 from kodarr.clients import Jellyfin
 from kodarr.match import VIDEO_EXTS
 
@@ -29,6 +31,7 @@ async def import_path(
     jellyfin: Jellyfin | None,
     path: Path,
     *,
+    http: httpx.AsyncClient | None = None,  # for inline season-NFO writes
     series: dict[str, Any] | None = None,  # known from the grab; else matched by title
     from_seadex: bool = False,
 ) -> int:
@@ -36,6 +39,7 @@ async def import_path(
     all_series = await db.monitored_series(conn)
     imported = 0
     touched_dirs: set[str] = set()
+    imported_entries: dict[int, dict] = {}
 
     for src in _video_files(path):
         parsed = match.parse(src.name)
@@ -92,6 +96,7 @@ async def import_path(
             # placeholder title now; the daily NFO pass fills real titles
             nfo.write_episode(dest, row, abs_num, (existing or {}).get("title"), source=src.name)
         touched_dirs.add(str(dest.parent))
+        imported_entries[row["anilist_id"]] = row
         imported += 1
         log.info(
             "imported",
@@ -104,6 +109,32 @@ async def import_path(
                 "seadex": from_seadex,
             },
         )
+
+    # first import of an entry beats the daily NFO pass by up to a day and
+    # jellyfin would show the bare folder name — write season metadata inline
+    # (anilist cache makes this free for anything recently fetched)
+    for row in imported_entries.values():
+        if http is None:
+            break
+        season_nfo = organize.series_dir(row) / ("season.nfo" if row["format"] != "MOVIE" else "movie.nfo")
+        if season_nfo.exists():
+            continue
+        try:
+            media = await anilist.by_id(http, row["anilist_id"], conn)
+            if row["format"] == "MOVIE":
+                await nfo.write_movie(http, row, media, await db.get_id_map(conn, row["anilist_id"]))
+            else:
+                show_nfo = organize.series_dir(row).parent / "tvshow.nfo"
+                if not show_nfo.exists():
+                    key = row.get("show_key") or row["anilist_id"]
+                    root_media = media if key == row["anilist_id"] else await anilist.by_id(http, key, conn)
+                    if row.get("show_title"):
+                        root_media = {**root_media, "title": row["show_title"]}
+                    await nfo.write_show(http, organize.series_dir(row).parent, root_media,
+                                         await db.get_id_map(conn, row["anilist_id"]))
+                await nfo.write_season(http, row, media)
+        except Exception:
+            log.exception("inline season nfo failed", extra={"event": "error", "anilist_id": row["anilist_id"]})
 
     if jellyfin:
         for d in touched_dirs:

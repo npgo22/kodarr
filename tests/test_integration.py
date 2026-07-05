@@ -157,6 +157,7 @@ def test_announce_to_library(postgres, tmp_path):
 
         d = object.__new__(daemon_mod.Daemon)  # skip __init__: wire fakes directly
         d.cfg, d.conn, d.qbit, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.jellyfin
+        d.http = svc.http
         await d.watch_pass()
 
         ep = await db.get_episode(conn, 154587, 3)
@@ -164,6 +165,11 @@ def test_announce_to_library(postgres, tmp_path):
         assert Path(ep["file_path"]).exists() and Path(ep["file_path"]).stat().st_ino == dl.stat().st_ino
         assert "anilist-154587" in ep["file_path"]
         assert fake.jellyfin_paths, "jellyfin was not notified"
+        # first import writes season + show metadata inline (no bare folder
+        # names in jellyfin while waiting for the daily nfo pass)
+        season_dir = Path(ep["file_path"]).parent
+        assert (season_dir / "season.nfo").exists(), "season.nfo missing after first import"
+        assert (season_dir.parent / "tvshow.nfo").exists(), "tvshow.nfo missing after first import"
         assert (await db.grabs_in_flight(conn)) == []
 
     asyncio.run(main())

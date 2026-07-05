@@ -74,7 +74,7 @@ async def cmd_import(cfg: Config, args) -> None:
             if cfg.jellyfin_url
             else None
         )
-        n = await importer.import_path(conn, jf, Path(args.path), from_seadex=args.seadex)
+        n = await importer.import_path(conn, jf, Path(args.path), http=http, from_seadex=args.seadex)
     print(f"imported {n} file(s)")
 
 
