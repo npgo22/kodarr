@@ -206,9 +206,19 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
         # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
         titles: dict[int, dict] = {n: {"title": t} for n, t in media["episode_titles"].items()}
         if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
+            # split cours share one TMDB season; our episode N is TMDB episode
+            # N + (episodes of earlier cours in the same TMDB season). This is
+            # unrelated to episode_offset, which describes release numbering.
+            cur = await conn.execute(
+                """SELECT COALESCE(SUM(sib.episodes), 0) AS off
+                   FROM series sib JOIN id_map im ON im.anilist_id = sib.anilist_id
+                   WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
+                (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
+            )
+            tmdb_off = (await cur.fetchone())["off"]
             tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
             for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
-                info = tmdb_eps.get(our_ep + s["episode_offset"])
+                info = tmdb_eps.get(our_ep + tmdb_off)
                 if info:
                     titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
         cur = await conn.execute(
