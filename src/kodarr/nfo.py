@@ -25,8 +25,12 @@ log = logging.getLogger(__name__)
 
 
 def _write_xml(root: ET.Element, path: Path) -> None:
+    # atomic: jellyfin scans race NFO rewrites, and a torn read leaves items
+    # with whatever parsed before the truncation (title but no episode number)
     ET.indent(root)
-    path.write_bytes(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    tmp = path.with_suffix(".nfo.tmp")
+    tmp.write_bytes(ET.tostring(root, encoding="utf-8", xml_declaration=True))
+    tmp.replace(path)
 
 
 def _el(parent: ET.Element, tag: str, text: Any) -> None:
