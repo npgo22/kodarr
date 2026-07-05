@@ -65,8 +65,9 @@ job, by category.
   TMDB: episode titles/overviews/stills/air-dates, show backdrops. Each episode
   carries `Source: <release filename>` (BD vs WEB at a glance). Jellyfin scans
   are purely local — configure the library with all remote fetchers OFF.
-- Polite by design: AniList throttle + Retry-After, conditional RSS GETs, weekly
-  search backoff, failed-release blocklist, stalled-grab expiry.
+- Polite by design: AniList throttle + permanent response cache, conditional RSS
+  GETs, weekly search backoff, stalled-grab expiry. Failed grabs are retryable —
+  qbit dedupes by infohash, so retries are free and self-heal after fixes.
 
 ## Setup
 

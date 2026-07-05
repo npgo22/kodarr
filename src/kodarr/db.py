@@ -109,14 +109,6 @@ async def get_id_map(conn: AsyncConnection, anilist_id: int) -> dict | None:
     return await cur.fetchone()
 
 
-async def failed_release_names(conn: AsyncConnection, anilist_id: int) -> set[str]:
-    """Blocklist: releases that failed before are never grabbed again."""
-    cur = await conn.execute(
-        "SELECT release_name FROM grabs WHERE anilist_id = %s AND status = 'failed'", (anilist_id,)
-    )
-    return {r["release_name"] for r in await cur.fetchall()}
-
-
 async def expire_stale_grabs(conn: AsyncConnection, days: int = 3) -> list[dict]:
     """Fail in-flight grabs that never completed so they stop blocking retries."""
     cur = await conn.execute(

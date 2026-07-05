@@ -16,15 +16,11 @@ from kodarr.clients import Qbit
 log = logging.getLogger(__name__)
 
 
-def rank(
-    results: list[dict], series: dict[str, Any], want_ep: int | None, blocklist: frozenset[str] | set[str] = frozenset()
-) -> list[tuple[tuple, dict]]:
+def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> list[tuple[tuple, dict]]:
     """Preferred-group releases for this exact series+episode; 1080p floor;
     best resolution first, seeders break ties."""
     scored = []
     for res in results:
-        if res["title"] in blocklist:
-            continue
         parsed = match.parse(res["title"])
         if parsed is None:
             continue
@@ -61,7 +57,6 @@ async def backfill_series(
     """
     if not force and await db.searched_recently(conn, series["anilist_id"]):
         return
-    blocklist = await db.failed_release_names(conn, series["anilist_id"])
     if series["format"] == "MOVIE":
         missing: list[int | None] = [] if await db.get_episode(conn, series["anilist_id"], 1) else [1]
     else:
@@ -99,7 +94,7 @@ async def backfill_series(
             except Exception as e:
                 log.error("nyaa search failed", extra={"event": "error", "query": query, "error": str(e)})
                 return
-            ranked = rank(results, series, ep, blocklist)
+            ranked = rank(results, series, ep)
             if ranked:
                 best = ranked[0][1]
                 break

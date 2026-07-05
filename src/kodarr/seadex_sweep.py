@@ -84,8 +84,6 @@ async def sweep_series(
         return
 
     release_name = best.files[0].name if best.files else series["title"]
-    if release_name in await db.failed_release_names(conn, series["anilist_id"]):
-        return  # blocklisted: this exact release already failed once
 
     log.info(
         "seadex grab",

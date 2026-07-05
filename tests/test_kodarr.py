@@ -146,8 +146,6 @@ def test_rank_preferred_group_resolution_then_seeders():
     ranked = rank(results, SLIME[3], 6)
     # non-preferred group excluded; sub-1080p excluded; seeders break the resolution tie
     assert [r["url"] for _, r in ranked] == ["u4", "u3"]
-    ranked = rank(results, SLIME[3], 6, {"[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [CCCC].mkv"})
-    assert [r["url"] for _, r in ranked] == ["u3"]
 
 
 def test_jellyfin_path_translation():

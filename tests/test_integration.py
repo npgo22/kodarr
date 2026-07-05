@@ -1,7 +1,7 @@
 """Integration tests: real Postgres (docker), fake external services (MockTransport).
 
 Covers the full pipeline: announce -> grab -> download complete -> import ->
-jellyfin notify, plus backfill ranking, the failed-release blocklist, and
+jellyfin notify, plus backfill ranking, retryable failures, and
 search backoff. Skipped entirely if docker isn't available.
 """
 
@@ -179,15 +179,14 @@ def test_stale_grab_expiry(postgres, tmp_path):
         expired = await db.expire_stale_grabs(conn)
         assert [g["release_name"] for g in expired] == ["old release"]
         assert await db.active_grab(conn, 154587, 1) is None
-        assert "old release" in await db.failed_release_names(conn, 154587)
 
     asyncio.run(main())
 
 
 
 
-def test_backfill_ranking_blocklist_backoff(postgres, tmp_path):
-    """Preferred-group 1080p wins; failed release is blocklisted; backoff skips."""
+def test_backfill_ranking_retry_backoff(postgres, tmp_path):
+    """Preferred-group 1080p wins; failed grabs retry; backoff skips."""
 
     async def main():
         conn = await fresh_conn()
@@ -205,14 +204,15 @@ def test_backfill_ranking_blocklist_backoff(postgres, tmp_path):
         await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake", force=True)
         assert len(fake.qbit_added) == 1 and "1.torrent" in fake.qbit_added[0], "preferred-group 1080p must win"
 
-        # that grab fails -> blocklisted; only sub-1080p and other-group remain -> nothing
+        # a failed grab is retryable: the same best release is grabbed again
+        # (qbit dedupes by infohash, so retry loops cost nothing)
         g = (await db.grabs_in_flight(conn))[0]
         await db.set_grab_status(conn, g["id"], "failed")
         await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake", force=True)
-        assert len(fake.qbit_added) == 1, "blocklist + 1080p floor must prevent regrab"
+        assert len(fake.qbit_added) == 2 and "1.torrent" in fake.qbit_added[1]
 
         # without force, the weekly backoff skips the series entirely
         await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake")
-        assert len(fake.qbit_added) == 1
+        assert len(fake.qbit_added) == 2
 
     asyncio.run(main())

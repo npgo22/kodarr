@@ -46,8 +46,6 @@ async def consider(
         return False
     if await db.active_grab(conn, series["anilist_id"], abs_num):
         return False
-    if release_name in await db.failed_release_names(conn, series["anilist_id"]):
-        return False
 
     log.info(
         "grab",
