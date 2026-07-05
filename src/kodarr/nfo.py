@@ -88,13 +88,28 @@ async def write_show(http: httpx.AsyncClient, show_dir: Path, root_media: dict[s
     await _download(http, root_media.get("banner_url"), show_dir / "fanart.jpg")
 
 
+def season_title(entry_title: str, show_title: str | None, season: int | None) -> str:
+    """Short season name: the entry title minus the show-title prefix.
+    'Slime Season 2 Part 2' -> 'Season 2 Part 2'; 'Slime: Visions of Coleus'
+    -> 'Visions of Coleus'; Monogatari arcs keep their own names."""
+    short = entry_title
+    if show_title and entry_title.lower().startswith(show_title.lower()):
+        short = entry_title[len(show_title):].strip(" :-–")
+    if not short:
+        return "Specials" if season == 0 else f"Season {season if season is not None else 1}"
+    return short
+
+
 async def write_season(http: httpx.AsyncClient, series: dict[str, Any], media: dict[str, Any]) -> None:
-    """season.nfo + folder.jpg inside the entry's Season NN dir, plus episode
-    title NFOs for files already on disk."""
+    """season.nfo + folder.jpg inside the entry's Season NN dir."""
     season_dir = organize.series_dir(series)
     season_dir.mkdir(parents=True, exist_ok=True)
     sn = ET.Element("season")
     _common(sn, media)
+    t = sn.find("title")
+    if t is not None:
+        sn.remove(t)
+    _el(sn, "title", season_title(media["title"], series.get("show_title"), series.get("season")))
     _el(sn, "seasonnumber", series.get("season") if series.get("season") is not None else 1)
     _write_xml(sn, season_dir / "season.nfo")
     await _download(http, media.get("cover_url"), season_dir / "folder.jpg")
@@ -134,8 +149,6 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
     """Write/update NFOs + artwork for the whole library. AniList for
     structure/plot/ratings; TMDB (when keyed) enriches episode titles,
     overviews, stills and show backdrops."""
-    import asyncio
-
     rows = await db.monitored_series(conn)
     # one batched fetch covers every entry + franchise root
     ids = list({i for s in rows for i in (s["anilist_id"], s.get("show_key") or s["anilist_id"])})

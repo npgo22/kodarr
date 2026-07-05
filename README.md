@@ -78,11 +78,11 @@ job, by category.
 3. **Jellyfin** — anime library on the anime root, every metadata/image fetcher
    disabled; set `[jellyfin] path_from/path_to` if kodarr and Jellyfin mount the
    media at different paths.
-4. **Seerr** — add kodarr as BOTH the default Sonarr and Radarr server: host
-   `kodarr`, port `7878`, API key = webhook token. With `[upstream]` configured,
-   kodarr proxies anything without an AniList mapping straight to your real
-   Sonarr/Radarr — anime and non-anime route automatically through one server
-   entry (seerr can't switch servers by genre on its own).
+4. **Seerr** — add kodarr as a Sonarr and a Radarr server (host `kodarr`,
+   port `7878`, API key = webhook token) alongside your real arrs. Routing is
+   seerr's job: keep the real arrs as defaults and pick the kodarr server for
+   anime requests. kodarr answers empty for anything without an AniList
+   mapping.
 5. **autobrr** (optional) — webhook action `POST /webhook/autobrr`, header
    `X-Kodarr-Token: <token>`, payload
    `{"release_name": "{{ .TorrentName }}", "download_url": "{{ .TorrentUrl }}"}`.
@@ -103,7 +103,7 @@ limits, by design or honestly unsolved:
 
 - **Anime only, one grab policy.** No quality profiles or custom formats — the
   ladder is SeaDex > preferred group at 1080p+, take it or fork it. Non-anime
-  is proxied to real Sonarr/Radarr, not handled.
+  is out of scope: seerr routes it to your real Sonarr/Radarr.
 - **Coverage is bounded by its sources.** Requests need a Fribb id mapping
   (~8k anime); shows without SubsPlease or SeaDex releases (old OVAs, obscure
   titles) sit at 0 files unless you point autobrr at them or import manually.

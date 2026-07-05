@@ -85,8 +85,6 @@ class FakeServices:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if request.url.host == "upstream-sonarr":
-            return httpx.Response(200, json=[{"id": 42, "title": "Breaking Bad", "tvdbId": 81189, "upstream": True}])
         if request.url.host == "graphql.anilist.co":
             import json
 

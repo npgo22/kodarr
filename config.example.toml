@@ -1,6 +1,6 @@
 # kodarr configuration. Secrets may instead come from env:
 # KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS,
-# KODARR_WEBHOOK_TOKEN, KODARR_TMDB_API_KEY, KODARR_UPSTREAM_*_API_KEY
+# KODARR_WEBHOOK_TOKEN, KODARR_TMDB_API_KEY
 
 [db]
 dsn = "postgresql://kodarr:secret@postgres-rw.database.svc:5432/kodarr"
@@ -28,7 +28,7 @@ feeds = ["https://subsplease.org/rss/?r=1080"]
 interval = 600
 
 [groups]
-# groups whose torrents beat usenet (currently-airing simulcast groups)
+# the release group RSS/backfill grabs; everything else comes via SeaDex
 preferred = ["SubsPlease"]
 
 [webhook]
@@ -39,9 +39,3 @@ token = ""
 # enrichment only (episode titles, stills, backdrops); structure stays AniList
 api_key = ""
 
-[upstream]
-# real sonarr/radarr for non-anime: requests without an AniList mapping proxy through
-sonarr_url = ""
-sonarr_api_key = ""
-radarr_url = ""
-radarr_api_key = ""

@@ -24,11 +24,6 @@ class Config:
     qbit_pass: str
     qbit_category: str
     tmdb_api_key: str = ""
-    # non-anime passthrough: requests without an AniList mapping proxy to the real arrs
-    upstream_sonarr_url: str = ""
-    upstream_sonarr_api_key: str = ""
-    upstream_radarr_url: str = ""
-    upstream_radarr_api_key: str = ""
     rss_feeds: list[str] = field(default_factory=list)
     rss_interval: int = 600
     preferred_groups: list[str] = field(default_factory=lambda: ["SubsPlease"])
@@ -65,10 +60,6 @@ def load(path: str | Path = "config.toml") -> Config:
         qbit_pass=_env("QBIT_PASS", get("qbittorrent", "pass")),
         qbit_category=get("qbittorrent", "category", "kodarr"),
         tmdb_api_key=_env("TMDB_API_KEY", get("tmdb", "api_key")),
-        upstream_sonarr_url=get("upstream", "sonarr_url"),
-        upstream_sonarr_api_key=_env("UPSTREAM_SONARR_API_KEY", get("upstream", "sonarr_api_key")),
-        upstream_radarr_url=get("upstream", "radarr_url"),
-        upstream_radarr_api_key=_env("UPSTREAM_RADARR_API_KEY", get("upstream", "radarr_api_key")),
         rss_feeds=get("rss", "feeds", ["https://subsplease.org/rss/?r=1080"]),
         rss_interval=int(get("rss", "interval", 600)),
         preferred_groups=get("groups", "preferred", ["SubsPlease"]),

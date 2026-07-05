@@ -9,9 +9,7 @@ spec:
     kind: OCIRepository
     name: kodarr
   dependsOn:
-    - name: prowlarr
     - name: qbittorrent
-    - name: sabnzbd
   interval: 30m
   values:
     controllers:
@@ -43,8 +41,8 @@ spec:
               TZ: ${CONFIG_TIMEZONE}
               KODARR_CONFIG: /config/config.toml
             envFrom:
-              # KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_PROWLARR_API_KEY,
-              # KODARR_SAB_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS, KODARR_WEBHOOK_TOKEN
+              # KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_QBIT_USER,
+              # KODARR_QBIT_PASS, KODARR_WEBHOOK_TOKEN, KODARR_TMDB_API_KEY
               - secretRef:
                   name: *secret
             probes:

@@ -1,6 +1,6 @@
 """TVDB/TMDB -> AniList id mapping via Fribb/anime-lists.
 
-Jellyseerr speaks TVDB (TV) and TMDB (movies); kodarr speaks AniList. One TVDB
+Seerr speaks TVDB (TV) and TMDB (movies); kodarr speaks AniList. One TVDB
 series maps to several AniList entries (one per season) — a request adds all
 of them.
 """

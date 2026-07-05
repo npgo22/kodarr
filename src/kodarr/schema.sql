@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS grabs (
     anilist_id      integer NOT NULL REFERENCES series ON DELETE CASCADE,
     absolute_number integer,                    -- NULL = batch / movie / seadex pack
     source          text NOT NULL,              -- rss | autobrr | seadex | search
-    client          text NOT NULL,              -- qbittorrent | sabnzbd
-    client_id       text,                       -- infohash or SAB nzo_id
+    client          text NOT NULL,              -- always 'qbittorrent' (usenet support removed)
+    client_id       text,                       -- torrent infohash when known
     release_name    text NOT NULL,
     status          text NOT NULL DEFAULT 'queued', -- queued|downloading|completed|imported|failed
     created_at      timestamptz NOT NULL DEFAULT now(),

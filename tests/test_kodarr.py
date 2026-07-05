@@ -313,3 +313,14 @@ def test_import_hardlink_and_replace(tmp_path):
     assert dest.stat().st_ino == src.stat().st_ino  # hardlinked, still seeds
     assert not old.exists()
     assert src.exists()
+
+
+def test_season_title():
+    from kodarr.nfo import season_title
+
+    slime = "That Time I Got Reincarnated as a Slime"
+    assert season_title(slime, slime, 1) == "Season 1"
+    assert season_title(f"{slime} Season 2 Part 2", slime, 3) == "Season 2 Part 2"
+    assert season_title(f"{slime}: Visions of Coleus", slime, 0) == "Visions of Coleus"
+    assert season_title("Nisemonogatari", "Monogatari Series", 2) == "Nisemonogatari"
+    assert season_title("Mushoku Tensei: Jobless Reincarnation Cour 2", "Mushoku Tensei: Jobless Reincarnation", 2) == "Cour 2"
