@@ -377,3 +377,17 @@ def test_franchise_members_includes_movies_and_specials():
         assert sorted(m["anilist_id"] for m in members) == [1, 2, 3, 4]
 
     asyncio.run(main())
+
+
+def test_movie_backfill_rejects_tv_batch():
+    """Slime movie searches matched the (01-48) TV batch: same short title,
+    episode=None on both sides slipped every gate."""
+    from kodarr.search import rank
+
+    movie = {"anilist_id": 139498, "title": "That Time I Got Reincarnated as a Slime the Movie: Scarlet Bond",
+             "format": "MOVIE", "episodes": 1, "aired": 1, "episode_offset": 0,
+             "preferred_group": "SubsPlease", "synonyms": ["Tensei Shitara Slime Datta Ken Movie: Guren no Kizuna-hen"]}
+    results = [
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken (01-48) (1080p) [Batch]", "seeders": 500, "url": "u1"},
+    ]
+    assert rank(results, movie, None) == []

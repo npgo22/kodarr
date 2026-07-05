@@ -73,6 +73,14 @@ def _resolution(value) -> int | None:
     return int(m.group(1)) if m else None
 
 
+_BATCH_RE = re.compile(r"\(\s*\d{1,3}\s*[-~]\s*\d{1,3}\s*\)|\bbatch\b", re.IGNORECASE)
+
+
+def is_batch(release_name: str) -> bool:
+    """Multi-episode batch: '(01-48)' ranges or an explicit Batch tag."""
+    return bool(_BATCH_RE.search(release_name))
+
+
 def parse(release_name: str) -> ParsedRelease | None:
     parsed = anitopy.parse(release_name)
     if not parsed or "anime_title" not in parsed:

@@ -30,7 +30,12 @@ def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> li
         if m is None:
             continue
         _, ep = m
-        if series["format"] != "MOVIE" and ep != want_ep:
+        if series["format"] == "MOVIE":
+            # a movie is one file: multi-episode batches ("(01-48)") parse with
+            # episode=None too, so require the release to not be a batch
+            if parsed.episode is None and match.is_batch(res["title"]):
+                continue
+        elif ep != want_ep:
             continue
         if (parsed.resolution or 0) < 1080:
             continue  # 1080p is the floor, never grab less
