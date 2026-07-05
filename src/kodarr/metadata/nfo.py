@@ -19,7 +19,9 @@ from typing import Any
 
 import httpx
 
-from kodarr import anilist, db, organize
+from kodarr.metadata import anilist
+from kodarr import db
+from kodarr.library import organize
 
 log = logging.getLogger(__name__)
 
@@ -109,9 +111,8 @@ async def write_show(
 
 
 def season_title(entry_title: str, show_title: str | None, season: int | None) -> str:
-    """Short season name: the entry title minus the show-title prefix.
-    'Slime Season 2 Part 2' -> 'Season 2 Part 2'; 'Slime: Visions of Coleus'
-    -> 'Visions of Coleus'; Monogatari arcs keep their own names."""
+    """Season display name: the entry title minus the show-title prefix, so
+    sequels shorten to "Season 2"/"Part 2" and arc titles keep their names."""
     short = entry_title
     if show_title and entry_title.lower().startswith(show_title.lower()):
         short = entry_title[len(show_title):].strip(" :-–")
@@ -191,7 +192,7 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
         show_dir = organize.series_dir(s).parent
         if key not in roots_done:
             root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
-            if s.get("show_title"):  # manual overrides ("Monogatari Series") beat the root entry's own title
+            if s.get("show_title"):  # manual show-title overrides beat the root entry's title
                 root_media = {**root_media, "title": s["show_title"]}
             await write_show(http, show_dir, root_media, idmap)
             if tmdb_client and idmap and idmap.get("tmdb_tv_id"):

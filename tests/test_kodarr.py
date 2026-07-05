@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from kodarr import match, organize
+from kodarr.library import match
+from kodarr.library import organize
 
 FRIEREN = {
     "anilist_id": 154587,
@@ -74,7 +75,7 @@ def test_digit_title_not_read_as_season():
 
 
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
-SLIME = [  # real AniList entries (2026-07); the show sonarr-anime misrouted
+SLIME = [  # real entries: split-cour franchise with absolute-numbered releases
     {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},
     {**_S, "anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season", "TenSura 2"]},
     {**_S, "anilist_id": 156822, "title": "That Time I Got Reincarnated as a Slime Season 3", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken 3rd Season", "Tensura 3"]},
@@ -83,8 +84,8 @@ SLIME = [  # real AniList entries (2026-07); the show sonarr-anime misrouted
 
 
 def test_slime_real_release_forms():
-    """Real Nyaa titles for Slime S4 (the show sonarr fetched wrong). Every
-    group's naming form must land on the S4 entry, never S1."""
+    """Real indexer titles, one per release-group naming convention; every
+    form must land on the season-4 entry, never season 1."""
     cases = [
         ("[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 13 (1080p) [C3528385].mkv", 13),
         ("[Erai-raws] Tensei Shitara Slime Datta Ken 4th Season - 13 [1080p CR WEBRip HEVC AAC][MultiSub]", 13),
@@ -106,8 +107,8 @@ def test_slime_real_release_forms():
 
 
 def test_split_cour_pack_routes_by_offset():
-    # Slime S2 = 12+12 across two AniList entries; pack files say S02E13-24.
-    # Part 2 carries episode_offset=12 so the overflow lands there as 1-12.
+    # a 12+12 split season: pack files number 13-24 continuously; the second
+    # entry carries episode_offset=12 so overflow lands there as 1-12
     part1 = {**_S, "anilist_id": 108511, "title": "That Time I Got Reincarnated as a Slime Season 2", "episodes": 12, "aired": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season"]}
     part2 = {**part1, "anilist_id": 116742, "episode_offset": 12, "synonyms": ["Tensei Shitara Slime Datta Ken 2nd Season Part 2"]}
     rows = [part1, part2]
@@ -135,7 +136,7 @@ def test_slime_s1_and_airing_bounds():
 
 
 def test_rank_preferred_group_resolution_then_seeders():
-    from kodarr.search import rank
+    from kodarr.acquire.backfill import rank
 
     results = [
         {"title": "That Time I Got Reincarnated as a Slime S04E06 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", "seeders": 900, "url": "u1"},
@@ -201,14 +202,14 @@ def test_dest_path_franchise_season():
 
 
 def test_franchise_walk_through_ova():
-    """Slime's real chain: S2's prequel is the Coleus OVA, whose prequel is S1.
-    The walk must hop the OVA; the OVA itself is Season 00."""
+    """Cours can chain through an OVA: the walk must hop it, and the OVA
+    itself files under Season 00."""
     import asyncio
     import json
 
     import httpx
 
-    from kodarr import anilist
+    from kodarr.metadata import anilist
 
     def rel(type_, id_, fmt):
         return {"relationType": type_, "node": {"id": id_, "format": fmt, "title": {"romaji": f"n{id_}", "english": None}, "startDate": {"year": 2018}}}
@@ -251,7 +252,7 @@ def test_nfo_writes(tmp_path):
 
     import httpx
 
-    from kodarr import nfo
+    from kodarr.metadata import nfo
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"jpegbytes")
@@ -265,7 +266,7 @@ def test_nfo_writes(tmp_path):
 
     async def main():
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        from kodarr import organize
+        from kodarr.library import organize
         await nfo.write_show(http, organize.series_dir(series).parent, media,
                              {"tvdb_id": 424536, "tmdb_tv_id": 209867, "tmdb_movie_id": None})
         await nfo.write_season(http, series, media)
@@ -288,7 +289,7 @@ def test_nfo_writes(tmp_path):
 
 
 def test_episode_title_parsing():
-    from kodarr.anilist import _episode_titles
+    from kodarr.metadata.anilist import _episode_titles
 
     titles = _episode_titles([
         {"title": "Episode 5 - The Master of Greed", "thumbnail": "x"},
@@ -316,7 +317,7 @@ def test_import_hardlink_and_replace(tmp_path):
 
 
 def test_season_title():
-    from kodarr.nfo import season_title
+    from kodarr.metadata.nfo import season_title
 
     slime = "That Time I Got Reincarnated as a Slime"
     assert season_title(slime, slime, 1) == "Season 1"
@@ -327,8 +328,8 @@ def test_season_title():
 
 
 def test_mushoku_short_title_matching():
-    """SubsPlease truncates at the colon: 'Mushoku Tensei S3 - 01'. The full
-    AniList title never appears in the release name."""
+    """Release groups truncate titles at the colon; the full catalog title
+    never appears in release names."""
     s1 = {**_S, "anilist_id": 108465, "title": "Mushoku Tensei: Jobless Reincarnation", "episodes": 11, "aired": 11, "synonyms": ["Mushoku Tensei: Isekai Ittara Honki Dasu"]}
     s3 = {**_S, "anilist_id": 178789, "title": "Mushoku Tensei: Jobless Reincarnation Season 3", "episodes": 14, "aired": 2, "synonyms": ["Mushoku Tensei: Isekai Ittara Honki Dasu Season 3"]}
     p = match.parse("[SubsPlease] Mushoku Tensei S3 - 01 (1080p) [C3A7F258].mkv")
@@ -343,14 +344,14 @@ def test_mushoku_short_title_matching():
 
 
 def test_franchise_members_includes_movies_and_specials():
-    """Requesting any entry must enumerate the whole chain: TV cours, the OVA
-    hop, and movies (TVDB's season shape drops those — the Monogatari lesson)."""
+    """Requesting any entry must enumerate the whole chain: TV cours, OVA
+    hops, and movies."""
     import asyncio
     import json
 
     import httpx
 
-    from kodarr import anilist
+    from kodarr.metadata import anilist
 
     def rel(type_, id_, fmt):
         return {"relationType": type_, "node": {"id": id_, "format": fmt, "title": {"romaji": f"n{id_}", "english": None}, "startDate": {"year": 2020}}}
@@ -380,9 +381,9 @@ def test_franchise_members_includes_movies_and_specials():
 
 
 def test_movie_backfill_rejects_tv_batch():
-    """Slime movie searches matched the (01-48) TV batch: same short title,
-    episode=None on both sides slipped every gate."""
-    from kodarr.search import rank
+    """A movie search must not match a same-titled TV batch (both parse
+    with episode=None)."""
+    from kodarr.acquire.backfill import rank
 
     movie = {"anilist_id": 139498, "title": "That Time I Got Reincarnated as a Slime the Movie: Scarlet Bond",
              "format": "MOVIE", "episodes": 1, "aired": 1, "episode_offset": 0,
@@ -394,11 +395,11 @@ def test_movie_backfill_rejects_tv_batch():
 
 
 def test_pick_best_falls_back_to_public_alt():
-    """Scarlet Bond: best is AB-only (private, no infohash); the entry's
-    public Nyaa alt must be picked instead of nothing."""
+    """When every 'best' is private-tracker-only, the entry's public alt
+    must be picked instead of nothing."""
     from types import SimpleNamespace
 
-    from kodarr.seadex_sweep import pick_best
+    from kodarr.acquire.seadex import pick_best
 
     def rec(best, public, infohash, group):
         tracker = SimpleNamespace(is_public=lambda p=public: p)

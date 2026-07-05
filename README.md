@@ -1,8 +1,71 @@
 # kodarr
 
-Anime-only Sonarr replacement: one headless daemon, a CLI, and Postgres. No web
-UI, no quality profiles, no season mapping — anime is identified by AniList ID,
-release group, and absolute episode number, so that's all kodarr models.
+A small daemon that manages an anime library the way anime actually works,
+instead of the way Western TV databases think it works.
+
+## Why this exists
+
+Sonarr models television as TVDB does: one show, numbered seasons, episodes
+inside them. Anime doesn't fit that model. A "season" is often several
+separately-catalogued cours, sometimes split by an OVA or a movie in the
+middle. Release groups number episodes absolutely, per cour, or by their own
+scheme. Season mappings between databases are maintained by hand, go stale,
+and silently misfile episodes. Layered on top: Sonarr's metadata flows through
+hosted relay services that go down, and media servers fetch metadata from
+remote APIs at scan time — slow, rate-limited, and wrong for anime.
+
+kodarr replaces that stack for anime with one opinionated pipeline built on
+the database that actually understands anime — AniList — plus SeaDex, the
+community's curated index of the best release of each show.
+
+## What it must do (the contract)
+
+- Track anime by **AniList entry**. One entry per cour/movie/OVA, grouped
+  into one library "show" per franchise via AniList's own relation graph.
+- Catch **airing episodes** from the preferred release group (RSS/autobrr),
+  and **backfill** missing ones from Nyaa.
+- **Upgrade** each finished season to its SeaDex-curated best release, then
+  leave it alone.
+- **Organize** files as `Show/Season NN/Show SnnEmmm [Group].ext` with
+  hardlinks (torrents keep seeding; removal is the download client's job).
+- Write **all metadata locally** (Kodi NFOs + artwork) at import time, so
+  media-server scans are instant, offline, and deterministic.
+- Answer the **Sonarr/Radarr API subset Seerr calls**, so requests work and
+  availability reports back — a request pulls the entire franchise.
+- Stay a **polite API citizen**: batched queries, permanent caching of
+  immutable data, global rate limiting, staggered schedules.
+
+## What it refuses to do (limitations on purpose)
+
+- **No quality profiles, custom formats, or scoring.** The policy is fixed:
+  preferred group at 1080p+ while airing, SeaDex best after. Configurability
+  here is where the *arr complexity explosion starts; if you need it, use
+  Sonarr.
+- **No usenet.** Torrent infohashes guarantee content identity; usenet
+  name-matching was the source of every wrong-content incident this project
+  ever had.
+- **No web UI, no users, no TLS.** It is a single-admin internal service;
+  humans interact through Seerr and the media server, admins through the CLI.
+- **No non-anime.** Seerr routes those requests to real Sonarr/Radarr.
+- **No general-purpose arr API.** Only what Seerr calls is implemented.
+
+## Honest limitations (not on purpose, just true)
+
+- **Filename parsing, not file hashes.** Matching is anitopy + AniList
+  synonyms. Known groups parse reliably; a bizarrely named release logs
+  `match_fail` and waits for a human. Hash-certain identification (AniDB
+  ed2k) would need a client registration and a much bigger matcher.
+- **Requests are bounded by the id mapping.** Seerr speaks TVDB/TMDB ids;
+  the community mapping table covers ~8k anime. Unmapped titles can't be
+  requested (add by AniList id via CLI instead).
+- **Franchise grouping trusts AniList relations.** Non-linear graphs
+  need manual `--show-root`/`--season` overrides.
+- **Episode titles/stills come from TMDB** where a mapping exists; obscure
+  entries fall back to "Episode N".
+- **No virtual "upcoming episode" entries** in the media server — NFO-based
+  metadata can only describe files that exist.
+- **Season-pack extras (S00 specials) are skipped**, not imported to their
+  own entries.
 
 ## How it fits in
 
@@ -43,87 +106,49 @@ flowchart LR
     pg[(Postgres)] <--> kodarr
 ```
 
-kodarr **replaces** sonarr-anime, radarr-anime, seadexarr, and Shoko/Shokofin.
-Regular Sonarr/Radarr/Lidarr keep handling non-anime; Seerr holds both — kodarr
-instances for anime, real arrs for everything else. Torrents keep seeding after
-import (hardlinks); removing finished seeds stays qBittorrent's/cleanuparr's
-job, by category.
+## Layout
 
-## Behavior
-
-- **Grab ladder**: SeaDex best release > preferred-group (SubsPlease) torrent —
-  torrent-only, nothing else, 1080p floor. SeaDex magnets are exact curated
-  content; SubsPlease/SeaDex seeding is excellent, and torrents can't import
-  the wrong show the way usenet name-matching could. Airing shows arrive via
-  RSS/autobrr; SeaDex upgrades after a season finishes and deletes the replaced
-  library file (the old torrent keeps seeding until your seed policy removes it).
-- **Layout**: one folder per franchise (AniList prequel-chain root), one
-  `Season NN` per AniList entry, `Show SnnEmmm [Group].mkv`, specials in
-  Season 00.
-- **Metadata**: Kodi NFOs + artwork written at import, refreshed daily. AniList:
-  plot, rating, genres, studio, dates, status, Japanese VA cast with images.
-  TMDB: episode titles/overviews/stills/air-dates, show backdrops. Each episode
-  carries `Source: <release filename>` (BD vs WEB at a glance). Jellyfin scans
-  are purely local — configure the library with all remote fetchers OFF.
-- Polite by design: AniList throttle + permanent response cache, conditional RSS
-  GETs, weekly search backoff, stalled-grab expiry. Failed grabs are retryable —
-  qbit dedupes by infohash, so retries are free and self-heal after fixes.
+```
+src/kodarr/
+  cli.py daemon.py api.py     entry points: CLI, scheduler loops, HTTP surface
+  config.py db.py log.py      config, Postgres (schema.sql), JSON logging
+  clients.py                  qBittorrent + Jellyfin
+  metadata/                   anilist (source of truth), tmdb (enrichment),
+                              mapping (tvdb/tmdb -> anilist ids), nfo (writer)
+  acquire/                    feeds (RSS/Nyaa), announce (RSS+autobrr grabs),
+                              backfill (Nyaa search), seadex (upgrade sweep)
+  library/                    match (release-name -> entry), organize (paths,
+                              hardlinks), importer (completed downloads -> library)
+```
 
 ## Setup
 
-1. **Postgres** — any instance; schema auto-applies on start.
-2. **Config** — `cp config.example.toml config.toml`; secrets may come from env:
-   `KODARR_DB_DSN`, `KODARR_JELLYFIN_API_KEY`, `KODARR_QBIT_USER/PASS`,
-   `KODARR_WEBHOOK_TOKEN`, `KODARR_TMDB_API_KEY` (optional, recommended),
-   `KODARR_UPSTREAM_SONARR/RADARR_API_KEY` (non-anime passthrough).
-3. **Jellyfin** — anime library on the anime root, every metadata/image fetcher
-   disabled; set `[jellyfin] path_from/path_to` if kodarr and Jellyfin mount the
-   media at different paths.
+1. **Postgres** — any instance; the schema applies itself on start.
+2. **Config** — `cp config.example.toml config.toml`; secrets can come from
+   env (`KODARR_DB_DSN`, `KODARR_JELLYFIN_API_KEY`, `KODARR_QBIT_USER/PASS`,
+   `KODARR_WEBHOOK_TOKEN`, `KODARR_TMDB_API_KEY`).
+3. **Jellyfin** — point the anime library at the anime root with every
+   remote metadata/image fetcher disabled; NFOs supply everything. Set
+   `[jellyfin] path_from/path_to` if mounts differ.
 4. **Seerr** — add kodarr as a Sonarr and a Radarr server (host `kodarr`,
-   port `7878`, API key = webhook token) alongside your real arrs. Routing is
-   seerr's job: keep the real arrs as defaults and pick the kodarr server for
-   anime requests. kodarr answers empty for anything without an AniList
-   mapping.
-5. **autobrr** (optional) — webhook action `POST /webhook/autobrr`, header
-   `X-Kodarr-Token: <token>`, payload
+   port `7878`, API key = webhook token) alongside the real arrs; pick the
+   kodarr server for anime requests.
+5. **autobrr** (optional) — webhook action to `POST /webhook/autobrr` with
+   header `X-Kodarr-Token` and payload
    `{"release_name": "{{ .TorrentName }}", "download_url": "{{ .TorrentUrl }}"}`.
-6. **Run** — `kodarr run`, or deploy `deploy/flux/` (Flux + bjw-s app-template;
-   image `ghcr.io/npgo22/kodarr` from CI; Grafana dashboard CR included, expects
-   a VictoriaLogs datasource).
+6. **Run** — `kodarr run`, or the Flux manifests in `deploy/flux/`
+   (image `ghcr.io/npgo22/kodarr`, Grafana dashboard CR included).
 
 CLI: `add <search|id> [--offset N] [--show-root ID] [--season N]`, `list`,
-`remove`, `backfill [--dry-run]`, `seadex [--force]`, `import <path> [--seadex]`,
+`remove`, `backfill [--dry-run]`, `seadex [--force]`, `import <path>`,
 `nfo`, `run [--dry-run]`.
 
-## Scope & shortcomings
-
-kodarr is a **single-admin, internal-only service** for a trusted network. It
-has no user accounts, no TLS, and a single shared API token — never expose it
-publicly; user-facing access goes through Seerr (behind your SSO). Known
-limits, by design or honestly unsolved:
-
-- **Anime only, one grab policy.** No quality profiles or custom formats — the
-  ladder is SeaDex > preferred group at 1080p+, take it or fork it. Non-anime
-  is out of scope: seerr routes it to your real Sonarr/Radarr.
-- **Coverage is bounded by its sources.** Requests need a Fribb id mapping
-  (~8k anime); shows without SubsPlease or SeaDex releases (old OVAs, obscure
-  titles) sit at 0 files unless you point autobrr at them or import manually.
-  Episode titles/stills need a TMDB mapping.
-- **Filename parsing, not hashes.** Matching is anitopy + AniList synonyms —
-  reliable for known groups, but a weirdly named release logs `match_fail`
-  instead of importing (watch the Grafana panel). Shoko's ed2k-hash certainty
-  is the trade-off we gave up for zero maintenance.
-- **Franchise grouping trusts AniList relations.** Pathological graphs
-  (Monogatari) need manual `--show-root`/`--season` overrides.
-- **No missing-episode placeholders in Jellyfin** — NFOs can't create virtual
-  items; you only see what's on disk.
-- **Season packs**: extras (S00) inside packs are skipped, not imported as
-  specials; multi-episode files get one episode number.
-- The Sonarr/Radarr API surface is the subset Seerr calls — it is not a
-  general Sonarr replacement for other tools.
-
-## Dev
+## Development
 
 ```sh
 uv sync && uv run pytest   # unit + integration (integration needs docker)
 ```
+
+Test fixtures use real release names and catalog entries deliberately —
+release-name parsing depends on exact strings, and the corpus encodes every
+naming convention that has ever broken matching.

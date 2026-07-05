@@ -121,9 +121,8 @@ def _episode_titles(streaming: list[dict]) -> dict[int, str]:
 
 
 def _prequel(media: dict[str, Any]) -> dict | None:
-    # any format: cours chain THROUGH OVAs (Slime S1 <- Coleus OVA <- S2) and
-    # movies (Bunny Girl S1 <- 3 movies <- Santa) — the walk must skip nothing;
-    # only the season counter filters by format
+    # cours can chain through OVAs and movies; the walk follows every PREQUEL
+    # edge and only the season counter filters by format
     for rel in media["relations"]:
         if rel["type"] == "PREQUEL":
             return rel
@@ -131,14 +130,13 @@ def _prequel(media: dict[str, Any]) -> dict | None:
 
 
 async def franchise_members(client: httpx.AsyncClient, media: dict[str, Any], conn) -> list[dict[str, Any]]:
-    """Every entry in the franchise: walk to the prequel root, then follow all
-    SEQUEL edges forward. Movies and OVAs are members too — a request for any
-    season should bring the whole franchise, not just TVDB-shaped seasons."""
+    """All franchise entries: walk to the prequel root, then follow SEQUEL
+    edges forward. Movies and OVAs are members too."""
     root_fr = await franchise(client, media, conn)
     root = await by_id(client, root_fr["show_key"], conn)
     seen: dict[int, dict] = {root["anilist_id"]: root}
     queue = [root]
-    while queue and len(seen) < 30:  # ponytail: cap walks on pathological graphs
+    while queue and len(seen) < 30:  # bounded; pathological graphs exist
         current = queue.pop(0)
         for rel in current["relations"]:
             if rel["type"] != "SEQUEL" or rel["id"] in seen:
@@ -153,17 +151,16 @@ async def franchise(client: httpx.AsyncClient, media: dict[str, Any], conn=None)
     """Walk PREQUEL relations to the franchise root: gives Jellyfin one show
     with one season folder per AniList entry. All AniList data — no TVDB.
 
-    Season = 1 + how many series-format (TV/ONA) entries precede this one in
-    the chain. OVA/special entries land in Season 00.
-    # ponytail: two specials entries in one franchise would collide in S00
-    # numbering — split with --show-root/--season overrides if that ever happens.
+    Season = 1 + count of series-format entries earlier in the chain;
+    OVA/special entries land in Season 00. Non-linear relation graphs need
+    the --show-root/--season overrides.
     """
     if media["format"] == "MOVIE":
         return {"show_key": media["anilist_id"], "show_title": media["title"],
                 "show_year": media["year"], "season": 1}
     chain = [media]
     current = media
-    for _ in range(20):  # ponytail: linear-chain walk; weird graphs -> --show-root/--season overrides
+    for _ in range(20):  # bounded walk; non-linear graphs need manual overrides
         prev = _prequel(current)
         if prev is None:
             break

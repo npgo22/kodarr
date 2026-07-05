@@ -11,10 +11,18 @@ from aiohttp import web
 from psycopg import AsyncConnection
 from seadex import SeaDexEntry
 
-from kodarr import anilist, db, grab, importer, mapping, nfo, rss, search, seadex_sweep, webhook
+from kodarr.metadata import anilist
+from kodarr import db
+from kodarr.acquire import announce as grab
+from kodarr.library import importer
+from kodarr.metadata import mapping
+from kodarr.metadata import nfo
+from kodarr.acquire import feeds as rss
+from kodarr.acquire import backfill as search
+from kodarr.acquire import seadex as seadex_sweep
 from kodarr.clients import Jellyfin, Qbit
 from kodarr.config import Config
-from kodarr.tmdb import Tmdb
+from kodarr.metadata.tmdb import Tmdb
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +66,7 @@ class Daemon:
             by_hash = {g["client_id"]: g for g in qbit_grabs if g["client_id"]}
             for t in await self.qbit.completed():
                 g = by_hash.get(t["hash"]) or next(
-                    # qbit's display name often carries a [CRC].mkv suffix the
-                    # indexer title lacks (or vice versa) — prefix-match both ways
+                    # display names and indexer titles differ by suffixes; prefix-match both ways
                     (g for g in qbit_grabs
                      if t["name"].startswith(g["release_name"].removesuffix(".mkv"))
                      or g["release_name"].startswith(t["name"])),
@@ -67,8 +74,7 @@ class Daemon:
                 )
                 if g:
                     await self._finish(g, Path(t["path"]))
-            # grabs whose torrent lives outside our category (autobrr added it
-            # first; our duplicate add 409'd) — find them by infohash
+            # torrents another tool added first live outside our category; find by infohash
             remaining = await db.grabs_in_flight(self.conn)
             by_hash = {g["client_id"]: g for g in remaining if g["client_id"] and len(g["client_id"]) == 40}
             for t in await self.qbit.by_hashes(list(by_hash)):
@@ -146,10 +152,9 @@ class Daemon:
         await nfo.refresh_all(self.conn, self.http, self.tmdb)
 
     async def run(self) -> None:
-        from kodarr import arr_api
+        from kodarr import api
 
-        app = webhook.make_app(self.handle_autobrr, self.cfg.webhook_token)
-        arr_api.add_routes(app, self, self.cfg.webhook_token)
+        app = api.build_app(self, self.cfg.webhook_token)
         runner = web.AppRunner(app, access_log=None)  # healthz probes would spam the log pipeline
         await runner.setup()
         await web.TCPSite(runner, port=self.cfg.webhook_port).start()

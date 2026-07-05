@@ -10,9 +10,13 @@ from psycopg import AsyncConnection
 
 import httpx
 
-from kodarr import anilist, db, match, nfo, organize
+from kodarr.metadata import anilist
+from kodarr import db
+from kodarr.library import match
+from kodarr.metadata import nfo
+from kodarr.library import organize
 from kodarr.clients import Jellyfin
-from kodarr.match import VIDEO_EXTS
+from kodarr.library.match import VIDEO_EXTS
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +62,7 @@ async def import_path(
                 episode = parsed.episode - row["episode_offset"]
                 total = row.get("episodes") or (row.get("aired") or 0) + 1
                 if not 1 <= episode <= total:
-                    # packs span split cours (Thighs Mushoku 1-23 covers two
-                    # AniList entries) — route overflow through full matching
+                    # packs can span split cours; route overflow through full matching
                     m = match.match(parsed, all_series)
                     if m is None:
                         log.warning("pack file out of range", extra={"event": "match_fail", "file": src.name})
@@ -110,9 +113,8 @@ async def import_path(
             },
         )
 
-    # first import of an entry beats the daily NFO pass by up to a day and
-    # jellyfin would show the bare folder name — write season metadata inline
-    # (anilist cache makes this free for anything recently fetched)
+    # write season/show metadata on an entry's first import so the media
+    # server never renders a bare folder name while the daily pass catches up
     for row in imported_entries.values():
         if http is None:
             break

@@ -1,7 +1,4 @@
-"""SeaDex best-release sweep: upgrade library entries to the curated best.
-
-Named seadex_sweep (not seadex) so the PyPI `seadex` client stays importable.
-"""
+"""SeaDex best-release sweep: upgrade finished series to the curated best."""
 
 from __future__ import annotations
 
@@ -32,9 +29,8 @@ def magnet(torrent: TorrentRecord) -> str:
 
 
 def pick_best(torrents: tuple[TorrentRecord, ...]) -> TorrentRecord | None:
-    """Best public torrent with an infohash; when every "best" lives on a
-    private tracker (AB), fall back to the entry's public alt — still
-    SeaDex-curated, just not their #1 pick."""
+    """Best public torrent with an infohash; if every "best" is private-only,
+    fall back to the entry's public alt (still curated, not the #1 pick)."""
     public = [t for t in torrents if t.tracker.is_public() and t.infohash]
     best = [t for t in public if t.is_best]
     if best:
@@ -63,8 +59,7 @@ async def sweep_series(
             (series["anilist_id"],),
         )
         row = await cur.fetchone()
-        # ponytail: fully-seadex series are never re-queried, so a changed SeaDex
-        # pick goes unnoticed — `kodarr seadex --force` re-checks everything.
+        # fully-upgraded series are not re-queried; --force re-checks everything
         if row and total and row["n"] >= total:
             return
 

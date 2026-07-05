@@ -9,7 +9,13 @@ from pathlib import Path
 
 import httpx
 
-from kodarr import anilist, db, importer, log, nfo, search, seadex_sweep
+from kodarr.metadata import anilist
+from kodarr import db
+from kodarr.library import importer
+from kodarr import log
+from kodarr.metadata import nfo
+from kodarr.acquire import backfill as search
+from kodarr.acquire import seadex as seadex_sweep
 from kodarr.clients import Jellyfin, Qbit
 from kodarr.config import Config, load
 
@@ -98,7 +104,7 @@ async def cmd_seadex(cfg: Config, args) -> None:
 
 
 async def cmd_nfo(cfg: Config, args) -> None:
-    from kodarr.tmdb import Tmdb
+    from kodarr.metadata.tmdb import Tmdb
 
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient(follow_redirects=True) as http:

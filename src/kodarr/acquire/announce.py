@@ -8,7 +8,8 @@ import re
 
 from psycopg import AsyncConnection
 
-from kodarr import db, match
+from kodarr import db
+from kodarr.library import match
 from kodarr.clients import Qbit
 
 log = logging.getLogger(__name__)

@@ -1,13 +1,9 @@
-"""Sonarr/Radarr v3 API subset — just enough for Seerr to use kodarr as its
-TV (Sonarr) and movie (Radarr) server.
+"""kodarr's HTTP surface: health, the autobrr webhook, and the Sonarr/Radarr
+v3 API subset Seerr talks to.
 
-Identity model: a Seerr "series id" is the TVDB id; a "movie id" is the TMDB
-id. Requested TVDB seasons map to AniList entries via id_map.tvdb_season, so
-per-season requests add exactly those cours. Auth: X-Api-Key == webhook token.
-
-# ponytail: implements what seerr's sonarr.ts/radarr.ts actually call —
-# status/rootfolder/profiles/tags/lookup/get/add/update/command. Anything
-# else 404s; extend when a seerr version starts calling it.
+Identity model for the arr API: a "series id" is a TVDB id, a "movie id" is
+a TMDB id; both resolve to AniList entries through id_map. Only the endpoints
+Seerr calls are implemented — anything else 404s.
 """
 
 from __future__ import annotations
@@ -187,7 +183,8 @@ class ArrApi:
         requested-season list is treated as "the user wants this franchise":
         every AniList chain member is added — TV entries as seasons, movies
         into the movie library."""
-        from kodarr import anilist, db
+        from kodarr.metadata import anilist
+from kodarr import db
 
         cur = await self.d.conn.execute(
             "SELECT anilist_id FROM id_map WHERE tvdb_id = %s AND tvdb_season > 0 ORDER BY tvdb_season LIMIT 1",
@@ -258,7 +255,8 @@ class ArrApi:
         return web.json_response(_movie_shape(tmdb_id, row["title"], row["year"], True, row["have"] > 0))
 
     async def movie_add(self, request):
-        from kodarr import anilist, db
+        from kodarr.metadata import anilist
+from kodarr import db
 
         body = await request.json()
         tmdb_id = int(body["tmdbId"])
@@ -275,7 +273,8 @@ class ArrApi:
         )
 
     async def _add_movie(self, anilist_id: int, tmdb_id: int) -> None:
-        from kodarr import anilist, db
+        from kodarr.metadata import anilist
+from kodarr import db
 
         media = await anilist.by_id(self.d.http, anilist_id, self.d.conn)
         fr = await anilist.franchise(self.d.http, media, self.d.conn)
@@ -284,12 +283,33 @@ class ArrApi:
         log.info("seerr add done", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": anilist_id})
 
 
-def add_routes(app: web.Application, daemon, token: str) -> None:
+def build_app(daemon, token: str) -> web.Application:
+    """The single aiohttp app: /healthz, /webhook/autobrr, /api/v3/*."""
+    app = web.Application(client_max_size=1024 * 1024)
+
+    async def healthz(_):
+        return web.Response(text="ok")
+
+    async def autobrr(request):
+        got = request.headers.get("X-Kodarr-Token", "")
+        if token and not hmac.compare_digest(got, token):
+            return web.Response(status=401)
+        try:
+            body = await request.json()
+            release_name, download_url = body["release_name"], body["download_url"]
+        except (ValueError, KeyError):
+            return web.Response(status=400, text="need JSON with release_name, download_url")
+        grabbed = await daemon.handle_autobrr(release_name, download_url)
+        return web.json_response({"grabbed": grabbed})
+
+    app.router.add_get("/healthz", healthz)
+    app.router.add_post("/webhook/autobrr", autobrr)
+
     api = ArrApi(daemon)
 
     @web.middleware
     async def auth(request, handler):
-        # real sonarr accepts header or query param; seerr uses ?apikey=
+        # sonarr convention: X-Api-Key header or ?apikey= query (seerr uses the query)
         got = request.headers.get("X-Api-Key") or request.query.get("apikey") or ""
         if request.path.startswith("/api/v3") and not hmac.compare_digest(got, token):
             return web.json_response({"error": "unauthorized"}, status=401)
@@ -314,3 +334,4 @@ def add_routes(app: web.Application, daemon, token: str) -> None:
     r.add_get("/api/v3/movie", api.movie_list)
     r.add_get("/api/v3/movie/{id}", api.movie_get)
     r.add_post("/api/v3/movie", api.movie_add)
+    return app

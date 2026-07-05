@@ -38,7 +38,7 @@ def _entry_season(names: set[str]) -> int:
         if m:
             return int(m.group(1) or m.group(2))
     for n in names:
-        # cap: shows titled with a number ("86") must not read as a season
+        # cap so shows titled with a bare number don't read as a season
         if n.isdigit() and 1 <= int(n) <= 20:
             return int(n)
     return 1
@@ -54,9 +54,8 @@ class ParsedRelease:
 
 
 def _collapse(value) -> int | None:
-    """anitopy returns a list when a number appears twice in the name
-    ("S04E10 ... 4th Season" -> ['4', '04']). Same value repeated is that
-    value; genuinely different values (a batch range) is no single value."""
+    """anitopy returns a list when a number appears twice in a name. The same
+    value repeated collapses to that value; different values (a range) don't."""
     if isinstance(value, list):
         ints = {int(v) for v in value if str(v).isdigit()}
         return ints.pop() if len(ints) == 1 else None
@@ -100,25 +99,19 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
     """Match a parsed release against series rows (needs title, synonyms,
     episode_offset keys). Returns (series, anilist_episode) or None.
 
-    anitopy strips the cour into ``season`` and leaves ``title`` as the base name,
-    while AniList keeps the season *in* the title ("... 4th Season"). So compare
-    against season-stripped synonyms, and when the release names a season, only
-    match the AniList entry for that season — otherwise "S4 - 04" collides with
-    the season-1 entry (same base title, episode in range).
-
-    A release with no season falls back to ``episode_offset`` routing, so groups
-    that number absolutely across cours still map to the right entry.
+    anitopy strips the cour marker into ``season``; AniList keeps it in the
+    title. Titles are therefore compared season-stripped, and a season-tagged
+    release only matches the entry for that season. Season-less releases route
+    by ``episode_offset`` (absolute numbering across cours).
     """
     want = normalize(parsed.title)
     wants = {want}
     if parsed.season is not None and want.endswith(f" {parsed.season}"):
-        # "Title 4 - S04E13": trailing digit restates the season
+        # a trailing digit in the title sometimes restates the season
         wants.add(want.removesuffix(f" {parsed.season}").strip())
     for row in series_rows:
         names = {normalize(n) for n in [row["title"], *row["synonyms"]]}
-        # groups truncate at the colon ("Mushoku Tensei S3", not
-        # "Mushoku Tensei: Jobless Reincarnation Season 3") — accept the
-        # pre-colon short form of every title too
+        # release groups truncate titles at the colon; accept pre-colon forms
         short = {normalize(n.split(":")[0]) for n in [row["title"], *row["synonyms"]] if ":" in n}
         base_names = names | short | {_strip_season(n) for n in names | short}
         if not (wants & base_names):
@@ -135,8 +128,8 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
             # while airing, episodes is NULL on AniList — cap at aired+1
             total = row.get("episodes") or (row.get("aired") or 0) + 1
             if parsed.season is not None:
-                # season-tagged releases number per cour... except split-cour
-                # packs ("S02E13" of a 12+12 season) — offset covers those
+                # season-tagged releases number per cour, except split-cour
+                # packs that number the whole season continuously
                 candidates = [parsed.episode, parsed.episode - row["episode_offset"]]
             else:
                 candidates = [parsed.episode - row["episode_offset"]]

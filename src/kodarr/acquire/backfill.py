@@ -1,6 +1,4 @@
-"""Nyaa backfill search for missing episodes/movies. Torrent-only:
-SubsPlease/SeaDex torrents are well-seeded, and torrents can't import the
-wrong content the way usenet name-matching could."""
+"""Nyaa backfill search for missing episodes and movies."""
 
 from __future__ import annotations
 
@@ -10,7 +8,9 @@ from typing import Any
 import httpx
 from psycopg import AsyncConnection
 
-from kodarr import db, match, rss
+from kodarr import db
+from kodarr.library import match
+from kodarr.acquire import feeds as rss
 from kodarr.clients import Qbit
 
 log = logging.getLogger(__name__)
@@ -31,8 +31,7 @@ def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> li
             continue
         _, ep = m
         if series["format"] == "MOVIE":
-            # a movie is one file: multi-episode batches ("(01-48)") parse with
-            # episode=None too, so require the release to not be a batch
+            # batches also parse with episode=None; a movie must not be a batch
             if parsed.episode is None and match.is_batch(res["title"]):
                 continue
         elif ep != want_ep:

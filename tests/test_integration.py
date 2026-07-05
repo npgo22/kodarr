@@ -16,7 +16,9 @@ import httpx
 import pytest
 
 from kodarr import daemon as daemon_mod
-from kodarr import db, grab, search
+from kodarr import db
+from kodarr.acquire import announce as grab
+from kodarr.acquire import backfill as search
 from kodarr.clients import Jellyfin, Qbit
 
 PG_PORT = 54331

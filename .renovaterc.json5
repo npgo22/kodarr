@@ -1,0 +1,26 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":semanticCommits",
+    ":timezone(America/New_York)",
+  ],
+  dependencyDashboard: true,
+  packageRules: [
+    { matchUpdateTypes: ["major"], addLabels: ["type/major"] },
+    { matchUpdateTypes: ["minor"], addLabels: ["type/minor"] },
+    { matchUpdateTypes: ["patch"], addLabels: ["type/patch"] },
+    { matchUpdateTypes: ["digest"], addLabels: ["type/digest"] },
+    { matchManagers: ["pep621"], addLabels: ["renovate/python"], semanticCommitType: "deps" },
+    { matchManagers: ["dockerfile"], addLabels: ["renovate/container"] },
+    { matchManagers: ["github-actions"], addLabels: ["renovate/github-action"] },
+    // non-major python bumps arrive as one weekly PR instead of a trickle
+    {
+      matchManagers: ["pep621"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "python dependencies (non-major)",
+      schedule: ["before 6am on monday"],
+    },
+  ],
+  lockFileMaintenance: { enabled: true, schedule: ["before 6am on monday"] },
+}
