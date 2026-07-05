@@ -268,7 +268,8 @@ def test_nfo_writes(tmp_path):
     async def main():
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         from kodarr import organize
-        await nfo.write_show(http, organize.series_dir(series).parent, media)
+        await nfo.write_show(http, organize.series_dir(series).parent, media,
+                             {"tvdb_id": 424536, "tmdb_tv_id": 209867, "tmdb_movie_id": None})
         await nfo.write_season(http, series, media)
         vid = organize.series_dir(series) / "x S01E001.mkv"
         vid.write_bytes(b"v")
@@ -279,7 +280,8 @@ def test_nfo_writes(tmp_path):
     tv = ET.parse(show_dir / "tvshow.nfo").getroot()
     assert tv.findtext("title") == "Frieren: Beyond Journey's End"
     assert tv.findtext("rating") == "8.9"
-    assert tv.find("uniqueid").text == "154587"
+    uids = {u.get("type"): u.text for u in tv.findall("uniqueid")}
+    assert uids == {"anilist": "154587", "tvdb": "424536", "tmdb": "209867"}
     assert (show_dir / "poster.jpg").read_bytes() == b"jpegbytes"
     season = ET.parse(show_dir / "Season 01" / "season.nfo").getroot()
     assert season.findtext("seasonnumber") == "1"
@@ -324,3 +326,19 @@ def test_season_title():
     assert season_title(f"{slime}: Visions of Coleus", slime, 0) == "Visions of Coleus"
     assert season_title("Nisemonogatari", "Monogatari Series", 2) == "Nisemonogatari"
     assert season_title("Mushoku Tensei: Jobless Reincarnation Cour 2", "Mushoku Tensei: Jobless Reincarnation", 2) == "Cour 2"
+
+
+def test_mushoku_short_title_matching():
+    """SubsPlease truncates at the colon: 'Mushoku Tensei S3 - 01'. The full
+    AniList title never appears in the release name."""
+    s1 = {**_S, "anilist_id": 108465, "title": "Mushoku Tensei: Jobless Reincarnation", "episodes": 11, "aired": 11, "synonyms": ["Mushoku Tensei: Isekai Ittara Honki Dasu"]}
+    s3 = {**_S, "anilist_id": 178789, "title": "Mushoku Tensei: Jobless Reincarnation Season 3", "episodes": 14, "aired": 2, "synonyms": ["Mushoku Tensei: Isekai Ittara Honki Dasu Season 3"]}
+    p = match.parse("[SubsPlease] Mushoku Tensei S3 - 01 (1080p) [C3A7F258].mkv")
+    assert p and p.season == 3 and p.episode == 1
+    m = match.match(p, [s1, s3])
+    assert m and m[0]["anilist_id"] == 178789 and m[1] == 1
+    # unseasoned S1-era name must stay on S1, never leak into S3
+    p = match.parse("[SubsPlease] Mushoku Tensei - 05 (1080p).mkv")
+    assert p and p.season is None
+    m = match.match(p, [s3, s1])  # s3 listed first on purpose
+    assert m and m[0]["anilist_id"] == 108465

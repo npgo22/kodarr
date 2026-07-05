@@ -78,10 +78,12 @@ async def backfill_series(
     # groups write "S4"/"4th Season", never AniList's exact title; the season
     # gate in rank()/match() filters any wrong-cour results the broad query
     # returns.
+    romaji = (series["synonyms"] or [series["title"]])[0]
     titles = list(
         dict.fromkeys(
             match._strip_season(match.normalize(t))
-            for t in [(series["synonyms"] or [series["title"]])[0], series["title"]]
+            # pre-colon short forms first: groups truncate ("Mushoku Tensei S3")
+            for t in [romaji.split(":")[0], series["title"].split(":")[0], romaji, series["title"]]
         )
     )
 

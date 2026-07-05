@@ -108,11 +108,20 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
         wants.add(want.removesuffix(f" {parsed.season}").strip())
     for row in series_rows:
         names = {normalize(n) for n in [row["title"], *row["synonyms"]]}
-        base_names = names | {_strip_season(n) for n in names}
+        # groups truncate at the colon ("Mushoku Tensei S3", not
+        # "Mushoku Tensei: Jobless Reincarnation Season 3") — accept the
+        # pre-colon short form of every title too
+        short = {normalize(n.split(":")[0]) for n in [row["title"], *row["synonyms"]] if ":" in n}
+        base_names = names | short | {_strip_season(n) for n in names | short}
         if not (wants & base_names):
             continue
-        if parsed.season is not None and parsed.season != _entry_season(names):
+        entry_season = _entry_season(names)
+        if parsed.season is not None and parsed.season != entry_season:
             continue  # release names a different cour than this entry
+        if parsed.season is None and entry_season > 1 and row["episode_offset"] == 0:
+            # unseasoned release + later-season entry with no absolute-numbering
+            # offset: this is a season-1-era file, not ours
+            continue
         ep = None
         if parsed.episode is not None:
             # while airing, episodes is NULL on AniList — cap at aired+1

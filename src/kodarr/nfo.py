@@ -78,11 +78,27 @@ def _common(root: ET.Element, media: dict[str, Any]) -> None:
         _el(actor, "order", i)
 
 
-async def write_show(http: httpx.AsyncClient, show_dir: Path, root_media: dict[str, Any]) -> None:
+def _external_ids(root: ET.Element, idmap: dict | None) -> None:
+    """tvdb/tmdb uniqueids alongside the anilist one. Jellyfin surfaces these
+    as ProviderIds, which is how Seerr maps library items to requests —
+    without them everything sits at 'Requested' forever."""
+    if not idmap:
+        return
+    for typ, val in (("tvdb", idmap.get("tvdb_id")), ("tmdb", idmap.get("tmdb_tv_id") or idmap.get("tmdb_movie_id"))):
+        if val:
+            uid = ET.SubElement(root, "uniqueid")
+            uid.set("type", typ)
+            uid.text = str(val)
+
+
+async def write_show(
+    http: httpx.AsyncClient, show_dir: Path, root_media: dict[str, Any], idmap: dict | None = None
+) -> None:
     """tvshow.nfo + poster/fanart from the franchise root entry."""
     show_dir.mkdir(parents=True, exist_ok=True)
     tv = ET.Element("tvshow")
     _common(tv, root_media)
+    _external_ids(tv, idmap)
     _write_xml(tv, show_dir / "tvshow.nfo")
     await _download(http, root_media.get("cover_url"), show_dir / "poster.jpg")
     await _download(http, root_media.get("banner_url"), show_dir / "fanart.jpg")
@@ -135,11 +151,14 @@ def write_episode(
     _write_xml(ep, video_path.with_suffix(".nfo"))
 
 
-async def write_movie(http: httpx.AsyncClient, series: dict[str, Any], media: dict[str, Any]) -> None:
+async def write_movie(
+    http: httpx.AsyncClient, series: dict[str, Any], media: dict[str, Any], idmap: dict | None = None
+) -> None:
     d = organize.series_dir(series)
     d.mkdir(parents=True, exist_ok=True)
     mv = ET.Element("movie")
     _common(mv, media)
+    _external_ids(mv, idmap)
     _write_xml(mv, d / "movie.nfo")
     await _download(http, media.get("cover_url"), d / "poster.jpg")
     await _download(http, media.get("banner_url"), d / "fanart.jpg")
@@ -158,7 +177,7 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
         media = await anilist.by_id(http, s["anilist_id"], conn)
         idmap = await db.get_id_map(conn, s["anilist_id"])
         if s["format"] == "MOVIE":
-            await write_movie(http, s, media)
+            await write_movie(http, s, media, idmap)
             if tmdb_client and idmap and idmap.get("tmdb_movie_id"):
                 url = await tmdb_client.backdrop(movie_id=idmap["tmdb_movie_id"])
                 if url:
@@ -170,7 +189,7 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
             root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
             if s.get("show_title"):  # manual overrides ("Monogatari Series") beat the root entry's own title
                 root_media = {**root_media, "title": s["show_title"]}
-            await write_show(http, show_dir, root_media)
+            await write_show(http, show_dir, root_media, idmap)
             if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
                 url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])
                 if url:
