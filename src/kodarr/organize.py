@@ -53,6 +53,7 @@ def import_file(src: Path, dest: Path, *, replace: Path | None = None) -> None:
     torrents keep seeding from the downloads dir."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".partial")
+    tmp.unlink(missing_ok=True)  # stale partial from an interrupted import
     try:
         tmp.hardlink_to(src)
     except OSError:

@@ -74,10 +74,16 @@ class Daemon:
             for t in await self.qbit.by_hashes(list(by_hash)):
                 await self._finish(by_hash[t["hash"]], Path(t["path"]))
     async def _finish(self, g: dict, path: Path) -> None:
-        series = await db.get_series(self.conn, g["anilist_id"])
-        n = await importer.import_path(
-            self.conn, self.jellyfin, path, series=series, from_seadex=g["source"] == "seadex"
-        )
+        # one broken import must not starve the rest of the watch pass;
+        # failures retry on later passes (grabs are retryable, qbit dedupes)
+        try:
+            series = await db.get_series(self.conn, g["anilist_id"])
+            n = await importer.import_path(
+                self.conn, self.jellyfin, path, series=series, from_seadex=g["source"] == "seadex"
+            )
+        except Exception:
+            log.exception("import failed", extra={"event": "error", "release": g["release_name"]})
+            n = 0
         await db.set_grab_status(self.conn, g["id"], "imported" if n else "failed")
 
     async def metadata_pass(self) -> None:
