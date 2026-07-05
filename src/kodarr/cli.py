@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 
 from kodarr import anilist, db, importer, log, nfo, search, seadex_sweep
-from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
+from kodarr.clients import Jellyfin, Qbit
 from kodarr.config import Config, load
 
 
@@ -81,13 +81,11 @@ async def cmd_import(cfg: Config, args) -> None:
 async def cmd_backfill(cfg: Config, args) -> None:
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient(follow_redirects=True) as http:
-        prowlarr = Prowlarr(http, cfg.prowlarr_url, cfg.prowlarr_api_key)
         qbit = Qbit(http, cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, cfg.qbit_category)
-        sab = Sab(http, cfg.sab_url, cfg.sab_api_key, cfg.sab_category)
         for s in await db.monitored_series(conn):
             if args.anilist_id and s["anilist_id"] != args.anilist_id:
                 continue
-            await search.backfill_series(conn, prowlarr, qbit, sab, s, dry_run=args.dry_run, force=True)
+            await search.backfill_series(conn, http, qbit, s, nyaa_url=cfg.nyaa_url, dry_run=args.dry_run, force=True)
 
 
 async def cmd_seadex(cfg: Config, args) -> None:
@@ -95,10 +93,8 @@ async def cmd_seadex(cfg: Config, args) -> None:
 
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient(follow_redirects=True) as http:
-        prowlarr = Prowlarr(http, cfg.prowlarr_url, cfg.prowlarr_api_key)
         qbit = Qbit(http, cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, cfg.qbit_category)
-        sab = Sab(http, cfg.sab_url, cfg.sab_api_key, cfg.sab_category)
-        await seadex_sweep.sweep_all(conn, SeaDexEntry(), prowlarr, qbit, sab, dry_run=args.dry_run, force=args.force)
+        await seadex_sweep.sweep_all(conn, SeaDexEntry(), qbit, dry_run=args.dry_run, force=args.force)
 
 
 async def cmd_nfo(cfg: Config, args) -> None:

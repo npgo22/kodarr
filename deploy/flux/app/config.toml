@@ -12,13 +12,6 @@ url = "http://jellyfin.media.svc.cluster.local:8096"
 path_from = "/data"
 path_to = "/media"
 
-[prowlarr]
-url = "http://prowlarr.downloads.svc.cluster.local"
-
-[sabnzbd]
-url = "http://sabnzbd.downloads.svc.cluster.local"
-category = "kodarr"
-
 [qbittorrent]
 url = "http://qbittorrent.downloads.svc.cluster.local:8080"
 category = "kodarr"

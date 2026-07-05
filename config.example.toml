@@ -1,6 +1,6 @@
 # kodarr configuration. Secrets may instead come from env:
-# KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_PROWLARR_API_KEY,
-# KODARR_SAB_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS, KODARR_WEBHOOK_TOKEN
+# KODARR_DB_DSN, KODARR_JELLYFIN_API_KEY, KODARR_QBIT_USER, KODARR_QBIT_PASS,
+# KODARR_WEBHOOK_TOKEN, KODARR_TMDB_API_KEY, KODARR_UPSTREAM_*_API_KEY
 
 [db]
 dsn = "postgresql://kodarr:secret@postgres-rw.database.svc:5432/kodarr"
@@ -14,14 +14,8 @@ downloads = "/data/downloads"
 url = "http://jellyfin.media.svc:8096"
 api_key = ""
 
-[prowlarr]
-url = "http://prowlarr.downloads.svc"
-api_key = ""
-
-[sabnzbd]
-url = "http://sabnzbd.downloads.svc"
-api_key = ""
-category = "kodarr"
+[nyaa]
+# url = "https://nyaa.si"
 
 [qbittorrent]
 url = "http://qbittorrent.downloads.svc"

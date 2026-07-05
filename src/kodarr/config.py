@@ -18,11 +18,7 @@ class Config:
     jellyfin_api_key: str
     jellyfin_path_from: str  # rewrite library paths for jellyfin's mount, e.g. /data -> /media
     jellyfin_path_to: str
-    prowlarr_url: str
-    prowlarr_api_key: str
-    sab_url: str
-    sab_api_key: str
-    sab_category: str
+    nyaa_url: str
     qbit_url: str
     qbit_user: str
     qbit_pass: str
@@ -63,11 +59,7 @@ def load(path: str | Path = "config.toml") -> Config:
         jellyfin_api_key=_env("JELLYFIN_API_KEY", get("jellyfin", "api_key")),
         jellyfin_path_from=get("jellyfin", "path_from"),
         jellyfin_path_to=get("jellyfin", "path_to"),
-        prowlarr_url=get("prowlarr", "url"),
-        prowlarr_api_key=_env("PROWLARR_API_KEY", get("prowlarr", "api_key")),
-        sab_url=get("sabnzbd", "url"),
-        sab_api_key=_env("SAB_API_KEY", get("sabnzbd", "api_key")),
-        sab_category=get("sabnzbd", "category", "kodarr"),
+        nyaa_url=get("nyaa", "url", "https://nyaa.si"),
         qbit_url=get("qbittorrent", "url"),
         qbit_user=_env("QBIT_USER", get("qbittorrent", "user")),
         qbit_pass=_env("QBIT_PASS", get("qbittorrent", "pass")),

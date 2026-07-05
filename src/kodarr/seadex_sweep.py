@@ -12,8 +12,8 @@ from typing import Any
 from psycopg import AsyncConnection
 from seadex import EntryNotFoundError, SeaDexEntry, TorrentRecord
 
-from kodarr import db, match
-from kodarr.clients import Prowlarr, Qbit, Sab
+from kodarr import db
+from kodarr.clients import Qbit
 
 log = logging.getLogger(__name__)
 
@@ -41,9 +41,7 @@ def pick_best(torrents: tuple[TorrentRecord, ...]) -> TorrentRecord | None:
 async def sweep_series(
     conn: AsyncConnection,
     seadex_entry: SeaDexEntry,
-    prowlarr: Prowlarr,
     qbit: Qbit,
-    sab: Sab,
     series: dict[str, Any],
     *,
     dry_run: bool = False,
@@ -86,57 +84,30 @@ async def sweep_series(
         return
 
     release_name = best.files[0].name if best.files else series["title"]
-
-    # prefer usenet: same group + title via Prowlarr newznab (AnimeTosho mirrors most of Nyaa)
-    client, url, client_id = "qbittorrent", magnet(best), None
-    romaji = (series["synonyms"] or [series["title"]])[0]
-    try:
-        results = await prowlarr.search(f"{romaji} {best.release_group}")
-        # the candidate must actually BE this series: groups like smol renumber
-        # franchise packs ("Monogatari Season 7" = Owarimonogatari), so a
-        # group+substring match alone imported the wrong show. When in doubt,
-        # the SeaDex magnet is the exact curated content — fall back to it.
-        usenet = [
-            r for r in results
-            if r["protocol"] == "usenet"
-            and best.release_group.lower() in r["title"].lower()
-            and (p := match.parse(r["title"])) is not None
-            and match.match(p, [series]) is not None
-        ]
-        if usenet:
-            client, url = "sabnzbd", usenet[0]["url"]
-            release_name = usenet[0]["title"]
-    except Exception as e:
-        log.error("prowlarr search failed", extra={"event": "error", "error": str(e)})
-
     if release_name in await db.failed_release_names(conn, series["anilist_id"]):
         return  # blocklisted: this exact release already failed once
 
     log.info(
         "seadex grab",
         extra={
-            "event": "grab", "source": "seadex", "client": client,
+            "event": "grab", "source": "seadex", "client": "qbittorrent",
             "anilist_id": series["anilist_id"], "series": series["title"],
             "group": best.release_group, "release": release_name, "dry_run": dry_run,
         },
     )
     if dry_run:
         return
-    if client == "sabnzbd":
-        client_id = await sab.add(url, release_name)
-    else:
-        await qbit.add(url)
-        client_id = best.infohash  # lets the watcher match the finished torrent
-    await db.insert_grab(conn, series["anilist_id"], None, "seadex", client, client_id, release_name)
+    await qbit.add(magnet(best))
+    await db.insert_grab(conn, series["anilist_id"], None, "seadex", "qbittorrent", best.infohash, release_name)
 
 
 async def sweep_all(
-    conn: AsyncConnection, seadex_entry: SeaDexEntry, prowlarr: Prowlarr, qbit: Qbit, sab: Sab,
+    conn: AsyncConnection, seadex_entry: SeaDexEntry, qbit: Qbit,
     *, dry_run: bool = False, force: bool = False,
 ) -> None:
     for series in await db.monitored_series(conn):
         try:
-            await sweep_series(conn, seadex_entry, prowlarr, qbit, sab, series, dry_run=dry_run, force=force)
+            await sweep_series(conn, seadex_entry, qbit, series, dry_run=dry_run, force=force)
         except Exception:
             log.exception("seadex sweep failed", extra={"event": "error", "anilist_id": series["anilist_id"]})
         await asyncio.sleep(1)  # be polite to SeaDex — it's a small community service

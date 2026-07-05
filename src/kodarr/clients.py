@@ -1,4 +1,4 @@
-"""Thin API wrappers: qBittorrent, SABnzbd, Prowlarr, Jellyfin."""
+"""Thin API wrappers: qBittorrent and Jellyfin."""
 
 from __future__ import annotations
 
@@ -47,54 +47,6 @@ class Qbit:
             {"hash": t["hash"], "name": t["name"], "path": t["content_path"]}
             for t in r.json()
             if t["state"] in _QBIT_DONE or t["progress"] == 1
-        ]
-
-
-class Sab:
-    def __init__(self, client: httpx.AsyncClient, url: str, api_key: str, category: str):
-        self.http, self.url, self.api_key, self.category = client, url.rstrip("/"), api_key, category
-
-    async def _api(self, **params: Any) -> dict:
-        r = await self.http.get(f"{self.url}/api", params={"apikey": self.api_key, "output": "json", **params})
-        r.raise_for_status()
-        return r.json()
-
-    async def add(self, nzb_url: str, name: str) -> str | None:
-        data = await self._api(mode="addurl", name=nzb_url, nzbname=name, cat=self.category)
-        ids = data.get("nzo_ids") or []
-        return ids[0] if ids else None
-
-    async def history(self) -> list[dict[str, Any]]:
-        """[{nzo_id, name, status, path}] — status Completed|Failed.
-
-        No category filter: SAB silently files jobs under cat=* when the
-        category doesn't exist in its config, which made a filtered query
-        return nothing forever. The watcher matches by nzo_id anyway.
-        """
-        data = await self._api(mode="history", limit=50)
-        return [
-            {"nzo_id": s["nzo_id"], "name": s["name"], "status": s["status"], "path": s.get("storage")}
-            for s in data["history"]["slots"]
-        ]
-
-
-class Prowlarr:
-    def __init__(self, client: httpx.AsyncClient, url: str, api_key: str):
-        self.http, self.url, self.api_key = client, url.rstrip("/"), api_key
-
-    async def search(self, query: str) -> list[dict[str, Any]]:
-        """[{title, protocol, downloadUrl}] protocol: usenet|torrent."""
-        r = await self.http.get(
-            f"{self.url}/api/v1/search",
-            params={"query": query, "type": "search", "limit": 100},
-            headers={"X-Api-Key": self.api_key},
-            timeout=120,  # fan-out to all indexers is slow
-        )
-        r.raise_for_status()
-        return [
-            {"title": x["title"], "protocol": x["protocol"], "url": x.get("downloadUrl") or x.get("magnetUrl")}
-            for x in r.json()
-            if x.get("downloadUrl") or x.get("magnetUrl")
         ]
 
 

@@ -14,7 +14,7 @@ flowchart LR
     subgraph sources [Release sources]
         rss[SubsPlease RSS]
         autobrr[autobrr]
-        prowlarr[Prowlarr]
+        nyaa[Nyaa]
         seadex[SeaDex releases.moe]
     end
     subgraph metadata [Metadata]
@@ -24,20 +24,18 @@ flowchart LR
     end
     subgraph download [Download clients]
         qbit[qBittorrent]
-        sab[SABnzbd]
     end
 
     seerr -- "Sonarr/Radarr v3 API<br>(kodarr impersonates both)" --> kodarr
     rss -- poll 10m --> kodarr
     autobrr -- webhook --> kodarr
-    kodarr -- backfill search --> prowlarr
+    kodarr -- backfill search --> nyaa
     kodarr -- best-release sweep --> seadex
     anilist -- "titles / seasons / relations<br>(source of truth)" --> kodarr
     tmdb -- "episode titles / stills / backdrops<br>(enrichment only)" --> kodarr
     fribb -- "tvdb/tmdb → anilist ids" --> kodarr
     kodarr -- torrents --> qbit
-    kodarr -- nzbs --> sab
-    qbit & sab -- completed --> kodarr
+    qbit -- completed --> kodarr
     kodarr -- "hardlink import<br>+ NFO + artwork" --> lib[(/data/media/anime)]
     kodarr -- path refresh --> jellyfin[Jellyfin]
     lib -- "local NFO scan<br>(no remote fetchers)" --> jellyfin
@@ -53,11 +51,12 @@ job, by category.
 
 ## Behavior
 
-- **Grab ladder**: SeaDex usenet > SeaDex torrent > preferred-group (SubsPlease)
-  usenet > preferred-group torrent — nothing else, 1080p floor. Airing shows
-  arrive via RSS/autobrr; SeaDex upgrades after a season finishes and deletes
-  the replaced library file (the old torrent keeps seeding until your policy
-  removes it).
+- **Grab ladder**: SeaDex best release > preferred-group (SubsPlease) torrent —
+  torrent-only, nothing else, 1080p floor. SeaDex magnets are exact curated
+  content; SubsPlease/SeaDex seeding is excellent, and torrents can't import
+  the wrong show the way usenet name-matching could. Airing shows arrive via
+  RSS/autobrr; SeaDex upgrades after a season finishes and deletes the replaced
+  library file (the old torrent keeps seeding until your seed policy removes it).
 - **Layout**: one folder per franchise (AniList prequel-chain root), one
   `Season NN` per AniList entry, `Show SnnEmmm [Group].mkv`, specials in
   Season 00.
@@ -73,9 +72,9 @@ job, by category.
 
 1. **Postgres** — any instance; schema auto-applies on start.
 2. **Config** — `cp config.example.toml config.toml`; secrets may come from env:
-   `KODARR_DB_DSN`, `KODARR_JELLYFIN_API_KEY`, `KODARR_PROWLARR_API_KEY`,
-   `KODARR_SAB_API_KEY`, `KODARR_QBIT_USER/PASS`, `KODARR_WEBHOOK_TOKEN`,
-   `KODARR_TMDB_API_KEY` (optional, strongly recommended).
+   `KODARR_DB_DSN`, `KODARR_JELLYFIN_API_KEY`, `KODARR_QBIT_USER/PASS`,
+   `KODARR_WEBHOOK_TOKEN`, `KODARR_TMDB_API_KEY` (optional, recommended),
+   `KODARR_UPSTREAM_SONARR/RADARR_API_KEY` (non-anime passthrough).
 3. **Jellyfin** — anime library on the anime root, every metadata/image fetcher
    disabled; set `[jellyfin] path_from/path_to` if kodarr and Jellyfin mount the
    media at different paths.

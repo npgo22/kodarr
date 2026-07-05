@@ -1,27 +1,26 @@
-"""Prowlarr backfill search for missing episodes/movies."""
+"""Nyaa backfill search for missing episodes/movies. Torrent-only:
+SubsPlease/SeaDex torrents are well-seeded, and torrents can't import the
+wrong content the way usenet name-matching could."""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+import httpx
 from psycopg import AsyncConnection
 
-from kodarr import db, match
-from kodarr.clients import Prowlarr, Qbit, Sab
+from kodarr import db, match, rss
+from kodarr.clients import Qbit
 
 log = logging.getLogger(__name__)
 
 
 def rank(
     results: list[dict], series: dict[str, Any], want_ep: int | None, blocklist: frozenset[str] | set[str] = frozenset()
-) -> list[tuple[int, dict]]:
-    """Preferred-group releases for this exact series+episode, usenet first.
-
-    Backfill never grabs other groups — those only enter the library via the
-    SeaDex sweep. (User policy: seadex usenet > seadex torrent > preferred-group
-    usenet > preferred-group torrent, nothing else.)
-    """
+) -> list[tuple[tuple, dict]]:
+    """Preferred-group releases for this exact series+episode; 1080p floor;
+    best resolution first, seeders break ties."""
     scored = []
     for res in results:
         if res["title"] in blocklist:
@@ -39,19 +38,18 @@ def rank(
             continue
         if (parsed.resolution or 0) < 1080:
             continue  # 1080p is the floor, never grab less
-        # resolution dominates transport: a 2160p torrent beats a 1080p nzb
-        scored.append(((parsed.resolution, 1 if res["protocol"] == "usenet" else 0), res))
+        scored.append(((parsed.resolution, res.get("seeders", 0)), res))
     scored.sort(key=lambda s: s[0], reverse=True)
     return scored
 
 
 async def backfill_series(
     conn: AsyncConnection,
-    prowlarr: Prowlarr,
+    http: httpx.AsyncClient,
     qbit: Qbit,
-    sab: Sab,
     series: dict[str, Any],
     *,
+    nyaa_url: str = "https://nyaa.si",
     dry_run: bool = False,
     force: bool = False,
 ) -> None:
@@ -59,7 +57,7 @@ async def backfill_series(
 
     Backoff: at most one search pass per series per week (metadata refresh
     clears last_search when new episodes air) — otherwise a never-found
-    episode hammers every indexer daily, forever.
+    episode hammers the indexer daily, forever.
     """
     if not force and await db.searched_recently(conn, series["anilist_id"]):
         return
@@ -75,7 +73,7 @@ async def backfill_series(
         have = {r["absolute_number"] for r in await cur.fetchall()}
         missing = [ep for ep in range(1, aired + 1) if ep not in have]
 
-    # Query with the romaji base title first (synonyms[0] by anilist._clean
+    # Query with the romaji base title (synonyms[0] by anilist._clean
     # construction) — release groups name in romaji. Strip the season phrase:
     # groups write "S4"/"4th Season", never AniList's exact title; the season
     # gate in rank()/match() filters any wrong-cour results the broad query
@@ -91,36 +89,34 @@ async def backfill_series(
         if await db.active_grab(conn, series["anilist_id"], ep):
             continue
         ranked = []
+        best = None
         for title in titles:
             query = title if ep is None else f"{title} {ep + series['episode_offset']:02d}"
             try:
-                results = await prowlarr.search(query)
+                results = await rss.nyaa_search(http, query, nyaa_url)
             except Exception as e:
-                log.error("prowlarr search failed", extra={"event": "error", "query": query, "error": str(e)})
+                log.error("nyaa search failed", extra={"event": "error", "query": query, "error": str(e)})
                 return
             ranked = rank(results, series, ep, blocklist)
             if ranked:
+                best = ranked[0][1]
                 break
-        if not ranked:
+        if best is None:
             log.info("nothing found", extra={"event": "search_miss", "anilist_id": series["anilist_id"], "episode": ep})
             continue
-        _, best = ranked[0]
-        client = "sabnzbd" if best["protocol"] == "usenet" else "qbittorrent"
         log.info(
             "grab",
             extra={
-                "event": "grab", "source": "search", "client": client,
+                "event": "grab", "source": "search", "client": "qbittorrent",
                 "anilist_id": series["anilist_id"], "series": series["title"],
                 "episode": ep, "release": best["title"], "dry_run": dry_run,
             },
         )
         if dry_run:
             continue
-        client_id = None
-        if client == "sabnzbd":
-            client_id = await sab.add(best["url"], best["title"])
-        else:
-            await qbit.add(best["url"])
-        await db.insert_grab(conn, series["anilist_id"], ep, "search", client, client_id, best["title"])
+        await qbit.add(best["url"])
+        await db.insert_grab(
+            conn, series["anilist_id"], ep, "search", "qbittorrent", best.get("infohash"), best["title"]
+        )
     if not dry_run:
         await db.mark_searched(conn, series["anilist_id"])

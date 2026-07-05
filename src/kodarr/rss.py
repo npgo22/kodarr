@@ -10,6 +10,27 @@ import httpx
 log = logging.getLogger(__name__)
 
 
+_NYAA_NS = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
+
+
+async def nyaa_search(client: httpx.AsyncClient, query: str, base: str = "https://nyaa.si") -> list[dict]:
+    """Search Nyaa via its RSS endpoint (c=1_2: anime, english-translated).
+    Returns [{title, url, infohash, seeders}] — url is the .torrent file."""
+    r = await client.get(f"{base}/", params={"page": "rss", "q": query, "c": "1_2", "f": "0"}, timeout=30)
+    r.raise_for_status()
+    root = ET.fromstring(r.content)
+    return [
+        {
+            "title": item.findtext("title"),
+            "url": item.findtext("link"),
+            "infohash": item.findtext("nyaa:infoHash", namespaces=_NYAA_NS),
+            "seeders": int(item.findtext("nyaa:seeders", default="0", namespaces=_NYAA_NS)),
+        }
+        for item in root.iterfind(".//item")
+        if item.findtext("title") and item.findtext("link")
+    ]
+
+
 async def fetch_items(
     client: httpx.AsyncClient, feed_url: str, cache: dict[str, dict[str, str]] | None = None
 ) -> list[tuple[str, str]]:

@@ -17,7 +17,7 @@ import pytest
 
 from kodarr import daemon as daemon_mod
 from kodarr import db, grab, search
-from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
+from kodarr.clients import Jellyfin, Qbit
 
 PG_PORT = 54331
 DSN = f"postgresql://postgres:test@127.0.0.1:{PG_PORT}/kodarr"
@@ -75,15 +75,13 @@ def series_row(tmp_path: Path, **over):
 
 
 class FakeServices:
-    """One MockTransport playing qbit + sab + prowlarr + jellyfin."""
+    """One MockTransport playing nyaa + qbit + jellyfin (+ anilist, upstream sonarr)."""
 
     def __init__(self):
         self.qbit_added: list[str] = []
-        self.sab_added: list[str] = []
         self.jellyfin_paths: list[str] = []
         self.qbit_torrents: list[dict] = []   # what /torrents/info reports
-        self.sab_history: list[dict] = []
-        self.prowlarr_results: list[dict] = []
+        self.nyaa_results: list[dict] = []    # [{title, url, infohash, seeders}]
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -111,13 +109,15 @@ class FakeServices:
             return httpx.Response(200)
         if path == "/api/v2/torrents/info":
             return httpx.Response(200, json=self.qbit_torrents)
-        if path == "/api" and request.url.params.get("mode") == "addurl":
-            self.sab_added.append(request.url.params["name"])
-            return httpx.Response(200, json={"nzo_ids": ["SABnzbd_nzo_1"]})
-        if path == "/api" and request.url.params.get("mode") == "history":
-            return httpx.Response(200, json={"history": {"slots": self.sab_history}})
-        if path == "/api/v1/search":
-            return httpx.Response(200, json=self.prowlarr_results)
+        if request.url.params.get("page") == "rss" and "q" in request.url.params:
+            items = "".join(
+                f"<item><title>{r['title']}</title><link>{r['url']}</link>"
+                f"<nyaa:infoHash>{r.get('infohash', '')}</nyaa:infoHash>"
+                f"<nyaa:seeders>{r.get('seeders', 0)}</nyaa:seeders></item>"
+                for r in self.nyaa_results
+            )
+            xml = f'<rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>{items}</channel></rss>'
+            return httpx.Response(200, content=xml.encode())
         if path == "/Library/Media/Updated":
             self.jellyfin_paths.append(request.read().decode())
             return httpx.Response(204)
@@ -131,8 +131,6 @@ class FakeServices:
         return SimpleNamespace(
             http=http,
             qbit=Qbit(http, "http://fake", "u", "p", "kodarr"),
-            sab=Sab(http, "http://fake", "key", "kodarr"),
-            prowlarr=Prowlarr(http, "http://fake", "key"),
             jellyfin=Jellyfin(http, "http://fake", "key"),
         )
 
@@ -160,7 +158,7 @@ def test_announce_to_library(postgres, tmp_path):
         fake.qbit_torrents = [{"hash": "beef", "name": name.removesuffix(".mkv"), "state": "stalledUP", "progress": 1, "content_path": str(dl)}]
 
         d = object.__new__(daemon_mod.Daemon)  # skip __init__: wire fakes directly
-        d.cfg, d.conn, d.qbit, d.sab, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.sab, svc.jellyfin
+        d.cfg, d.conn, d.qbit, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.jellyfin
         await d.watch_pass()
 
         ep = await db.get_episode(conn, 154587, 3)
@@ -169,42 +167,6 @@ def test_announce_to_library(postgres, tmp_path):
         assert "anilist-154587" in ep["file_path"]
         assert fake.jellyfin_paths, "jellyfin was not notified"
         assert (await db.grabs_in_flight(conn)) == []
-
-    asyncio.run(main())
-
-
-def test_backfill_ranking_blocklist_backoff(postgres, tmp_path):
-    """Preferred-group torrent beats usenet; failed release is blocklisted; backoff skips."""
-
-    async def main():
-        conn = await fresh_conn()
-        fake = FakeServices()
-        svc = fake.wire()
-        media, root = series_row(tmp_path, episodes=1, aired=1)
-        await db.add_series(conn, media, root)
-
-        sp = "[SubsPlease] Sousou no Frieren - 01 (1080p).mkv"
-        fake.prowlarr_results = [
-            {"title": sp, "protocol": "usenet", "downloadUrl": "http://nzb/1"},
-            {"title": sp, "protocol": "torrent", "downloadUrl": "magnet:?xt=urn:btih:aaaa"},
-            {"title": "[Other] Sousou no Frieren - 01.mkv", "protocol": "torrent", "downloadUrl": "magnet:?xt=urn:btih:bbbb"},
-        ]
-
-        series = await db.get_series(conn, 154587)
-        await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series, force=True)
-        assert fake.sab_added == ["http://nzb/1"] and not fake.qbit_added, "preferred-group usenet should win"
-
-        # that grab fails -> blocklisted... but same release name covers the torrent
-        # copy too, and [Other] is never eligible -> nothing left to grab
-        g = (await db.grabs_in_flight(conn))[0]
-        await db.set_grab_status(conn, g["id"], "failed")
-        await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series, force=True)
-        assert not fake.qbit_added, "non-preferred groups must never be grabbed by backfill"
-
-        # without force, the weekly backoff skips the series entirely
-        before = len(fake.qbit_added) + len(fake.sab_added)
-        await search.backfill_series(conn, svc.prowlarr, svc.qbit, svc.sab, series)
-        assert len(fake.qbit_added) + len(fake.sab_added) == before, "backoff should prevent re-search"
 
     asyncio.run(main())
 
@@ -224,19 +186,35 @@ def test_stale_grab_expiry(postgres, tmp_path):
     asyncio.run(main())
 
 
-def test_sab_failed_download(postgres, tmp_path):
+
+
+def test_backfill_ranking_blocklist_backoff(postgres, tmp_path):
+    """Preferred-group 1080p wins; failed release is blocklisted; backoff skips."""
+
     async def main():
         conn = await fresh_conn()
         fake = FakeServices()
         svc = fake.wire()
-        media, root = series_row(tmp_path)
+        media, root = series_row(tmp_path, episodes=1, aired=1)
         await db.add_series(conn, media, root)
-        await db.insert_grab(conn, 154587, 5, "search", "sabnzbd", "SABnzbd_nzo_9", "Frieren E05 nzb")
-        fake.sab_history = [{"nzo_id": "SABnzbd_nzo_9", "name": "Frieren E05 nzb", "status": "Failed", "storage": None}]
 
-        d = object.__new__(daemon_mod.Daemon)
-        d.cfg, d.conn, d.qbit, d.sab, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.sab, svc.jellyfin
-        await d.watch_pass()
-        assert "Frieren E05 nzb" in await db.failed_release_names(conn, 154587)
+        fake.nyaa_results = [
+            {"title": "[SubsPlease] Sousou no Frieren - 01 (1080p) [AAAA].mkv", "url": "http://nyaa/1.torrent", "infohash": "aaaa", "seeders": 500},
+            {"title": "[SubsPlease] Sousou no Frieren - 01 (720p) [BBBB].mkv", "url": "http://nyaa/2.torrent", "infohash": "bbbb", "seeders": 900},
+            {"title": "[Other] Sousou no Frieren - 01 (1080p).mkv", "url": "http://nyaa/3.torrent", "infohash": "cccc", "seeders": 999},
+        ]
+        series = await db.get_series(conn, 154587)
+        await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake", force=True)
+        assert len(fake.qbit_added) == 1 and "1.torrent" in fake.qbit_added[0], "preferred-group 1080p must win"
+
+        # that grab fails -> blocklisted; only sub-1080p and other-group remain -> nothing
+        g = (await db.grabs_in_flight(conn))[0]
+        await db.set_grab_status(conn, g["id"], "failed")
+        await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake", force=True)
+        assert len(fake.qbit_added) == 1, "blocklist + 1080p floor must prevent regrab"
+
+        # without force, the weekly backoff skips the series entirely
+        await search.backfill_series(conn, svc.http, svc.qbit, series, nyaa_url="http://fake")
+        assert len(fake.qbit_added) == 1
 
     asyncio.run(main())

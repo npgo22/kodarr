@@ -134,21 +134,20 @@ def test_slime_s1_and_airing_bounds():
     assert match.match(p, SLIME) is None
 
 
-def test_rank_preferred_group_only_resolution_then_usenet():
+def test_rank_preferred_group_resolution_then_seeders():
     from kodarr.search import rank
 
     results = [
-        {"title": "That Time I Got Reincarnated as a Slime S04E06 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", "protocol": "torrent", "url": "u1"},
-        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (720p) [BBBB].mkv", "protocol": "usenet", "url": "u2"},
-        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "torrent", "url": "u3"},
-        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "protocol": "usenet", "url": "u4"},
+        {"title": "That Time I Got Reincarnated as a Slime S04E06 1080p CR WEB-DL MULTi AAC2.0 H 264-VARYG (Tensei Shitara Slime Datta Ken 4th Season, Multi-Subs)", "seeders": 900, "url": "u1"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (720p) [BBBB].mkv", "seeders": 500, "url": "u2"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv", "seeders": 100, "url": "u3"},
+        {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [CCCC].mkv", "seeders": 400, "url": "u4"},
     ]
     ranked = rank(results, SLIME[3], 6)
-    # non-preferred group excluded; sub-1080p excluded outright; usenet wins within 1080p
+    # non-preferred group excluded; sub-1080p excluded; seeders break the resolution tie
     assert [r["url"] for _, r in ranked] == ["u4", "u3"]
-    # blocklisted releases drop out entirely — and nothing below the floor backfills
-    ranked = rank(results, SLIME[3], 6, {"[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [AAAA].mkv"})
-    assert ranked == []
+    ranked = rank(results, SLIME[3], 6, {"[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [CCCC].mkv"})
+    assert [r["url"] for _, r in ranked] == ["u3"]
 
 
 def test_jellyfin_path_translation():

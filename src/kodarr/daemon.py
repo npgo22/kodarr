@@ -12,7 +12,7 @@ from psycopg import AsyncConnection
 from seadex import SeaDexEntry
 
 from kodarr import anilist, db, grab, importer, mapping, nfo, rss, search, seadex_sweep, webhook
-from kodarr.clients import Jellyfin, Prowlarr, Qbit, Sab
+from kodarr.clients import Jellyfin, Qbit
 from kodarr.config import Config
 from kodarr.tmdb import Tmdb
 
@@ -27,8 +27,6 @@ class Daemon:
         self.conn = conn
         self.http = httpx.AsyncClient(follow_redirects=True)
         self.qbit = Qbit(self.http, cfg.qbit_url, cfg.qbit_user, cfg.qbit_pass, cfg.qbit_category)
-        self.sab = Sab(self.http, cfg.sab_url, cfg.sab_api_key, cfg.sab_category)
-        self.prowlarr = Prowlarr(self.http, cfg.prowlarr_url, cfg.prowlarr_api_key)
         self.jellyfin = Jellyfin(
             self.http, cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_path_from, cfg.jellyfin_path_to
         )
@@ -55,10 +53,7 @@ class Daemon:
     async def watch_pass(self) -> None:
         for g in await db.expire_stale_grabs(self.conn):
             log.warning("grab expired (stalled)", extra={"event": "download_failed", "release": g["release_name"]})
-        inflight = await db.grabs_in_flight(self.conn)
-        if not inflight:
-            return
-        qbit_grabs = [g for g in inflight if g["client"] == "qbittorrent"]
+        qbit_grabs = await db.grabs_in_flight(self.conn)
         if qbit_grabs:
             by_hash = {g["client_id"]: g for g in qbit_grabs if g["client_id"]}
             for t in await self.qbit.completed():
@@ -72,20 +67,6 @@ class Daemon:
                 )
                 if g:
                     await self._finish(g, Path(t["path"]))
-        sab_grabs = [g for g in inflight if g["client"] == "sabnzbd"]
-        if sab_grabs:
-            by_id = {g["client_id"]: g for g in sab_grabs if g["client_id"]}
-            by_name = {g["release_name"]: g for g in sab_grabs}
-            for slot in await self.sab.history():
-                g = by_id.get(slot["nzo_id"]) or by_name.get(slot["name"])
-                if not g:
-                    continue
-                if slot["status"] == "Completed" and slot["path"]:
-                    await self._finish(g, Path(slot["path"]))
-                elif slot["status"] == "Failed":
-                    await db.set_grab_status(self.conn, g["id"], "failed")
-                    log.warning("download failed", extra={"event": "download_failed", "release": g["release_name"]})
-
     async def _finish(self, g: dict, path: Path) -> None:
         series = await db.get_series(self.conn, g["anilist_id"])
         n = await importer.import_path(
@@ -108,13 +89,11 @@ class Daemon:
     async def backfill_pass(self) -> None:
         for s in await db.monitored_series(self.conn):
             await search.backfill_series(
-                self.conn, self.prowlarr, self.qbit, self.sab, s, dry_run=self.cfg.dry_run
+                self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url, dry_run=self.cfg.dry_run
             )
 
     async def seadex_pass(self) -> None:
-        await seadex_sweep.sweep_all(
-            self.conn, self.seadex, self.prowlarr, self.qbit, self.sab, dry_run=self.cfg.dry_run
-        )
+        await seadex_sweep.sweep_all(self.conn, self.seadex, self.qbit, dry_run=self.cfg.dry_run)
 
     async def handle_autobrr(self, release_name: str, download_url: str) -> bool:
         return await grab.consider(
@@ -141,8 +120,8 @@ class Daemon:
             if s is None:
                 continue
             try:
-                await search.backfill_series(self.conn, self.prowlarr, self.qbit, self.sab, s, dry_run=self.cfg.dry_run)
-                await seadex_sweep.sweep_series(self.conn, self.seadex, self.prowlarr, self.qbit, self.sab, s, dry_run=self.cfg.dry_run)
+                await search.backfill_series(self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url, dry_run=self.cfg.dry_run)
+                await seadex_sweep.sweep_series(self.conn, self.seadex, self.qbit, s, dry_run=self.cfg.dry_run)
             except Exception:
                 log.exception("processing new request failed", extra={"event": "error", "anilist_id": anilist_id})
 
