@@ -224,3 +224,53 @@ def test_backfill_ranking_retry_backoff(postgres, tmp_path):
         assert len(fake.qbit_added) == 2
 
     asyncio.run(main())
+
+
+def test_arr_api_for_seerr(postgres, tmp_path):
+    """The Sonarr-shaped surface Seerr drives: auth, discovery endpoints,
+    lookup, and a season request adding franchise entries."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from kodarr import api
+
+    async def main():
+        conn = await fresh_conn()
+        fake = FakeServices()
+        svc = fake.wire()
+        await conn.execute("DELETE FROM id_map")
+        await conn.execute(
+            "INSERT INTO id_map (anilist_id, tvdb_id, tvdb_season) VALUES (101280, 352408, 1)"
+        )
+
+        d = object.__new__(daemon_mod.Daemon)
+        d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
+        d.conn, d.http = conn, svc.http
+        d.qbit, d.jellyfin = svc.qbit, svc.jellyfin
+        d._bg = set()
+
+        client = TestClient(TestServer(api.build_app(d, "tok")))
+        await client.start_server()
+        h = {"X-Api-Key": "tok"}
+
+        assert (await client.get("/api/v3/system/status")).status == 401
+        for path in ("/api/v3/system/status", "/api/v3/rootfolder", "/api/v3/qualityprofile", "/api/v3/tag"):
+            assert (await client.get(path, headers=h)).status == 200, path
+        assert (await client.get("/healthz")).status == 200
+
+        r = await client.get("/api/v3/series/lookup", params={"term": "tvdb:99999"}, headers=h)
+        assert await r.json() == []  # unmapped: not anime, seerr routes elsewhere
+
+        r = await client.get("/api/v3/series/lookup", params={"term": "tvdb:352408"}, headers=h)
+        [series] = await r.json()
+        assert series["id"] == 0 and series["tvdbId"] == 352408
+
+        r = await client.post("/api/v3/series", headers=h, json={
+            "tvdbId": 352408, "qualityProfileId": 1, "rootFolderPath": str(tmp_path / "anime"),
+            "seasons": [{"seasonNumber": 1, "monitored": True}],
+        })
+        assert r.status == 201
+        await asyncio.gather(*d._bg)  # adds run in the background
+        assert await db.get_series(conn, 101280) is not None
+        await client.close()
+
+    asyncio.run(main())

@@ -183,8 +183,8 @@ class ArrApi:
         requested-season list is treated as "the user wants this franchise":
         every AniList chain member is added — TV entries as seasons, movies
         into the movie library."""
+        from kodarr import db
         from kodarr.metadata import anilist
-from kodarr import db
 
         cur = await self.d.conn.execute(
             "SELECT anilist_id FROM id_map WHERE tvdb_id = %s AND tvdb_season > 0 ORDER BY tvdb_season LIMIT 1",
@@ -255,8 +255,8 @@ from kodarr import db
         return web.json_response(_movie_shape(tmdb_id, row["title"], row["year"], True, row["have"] > 0))
 
     async def movie_add(self, request):
+        from kodarr import db
         from kodarr.metadata import anilist
-from kodarr import db
 
         body = await request.json()
         tmdb_id = int(body["tmdbId"])
@@ -273,8 +273,8 @@ from kodarr import db
         )
 
     async def _add_movie(self, anilist_id: int, tmdb_id: int) -> None:
+        from kodarr import db
         from kodarr.metadata import anilist
-from kodarr import db
 
         media = await anilist.by_id(self.d.http, anilist_id, self.d.conn)
         fr = await anilist.franchise(self.d.http, media, self.d.conn)
