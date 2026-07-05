@@ -32,10 +32,14 @@ def magnet(torrent: TorrentRecord) -> str:
 
 
 def pick_best(torrents: tuple[TorrentRecord, ...]) -> TorrentRecord | None:
-    """Best public torrent with an infohash. SeaDex often lists the same
-    release on Nyaa and AnimeTosho; any one of them works as a magnet."""
-    candidates = [t for t in torrents if t.is_best and t.tracker.is_public() and t.infohash]
-    return candidates[0] if candidates else None
+    """Best public torrent with an infohash; when every "best" lives on a
+    private tracker (AB), fall back to the entry's public alt — still
+    SeaDex-curated, just not their #1 pick."""
+    public = [t for t in torrents if t.tracker.is_public() and t.infohash]
+    best = [t for t in public if t.is_best]
+    if best:
+        return best[0]
+    return public[0] if public else None
 
 
 async def sweep_series(

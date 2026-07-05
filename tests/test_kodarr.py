@@ -391,3 +391,24 @@ def test_movie_backfill_rejects_tv_batch():
         {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken (01-48) (1080p) [Batch]", "seeders": 500, "url": "u1"},
     ]
     assert rank(results, movie, None) == []
+
+
+def test_pick_best_falls_back_to_public_alt():
+    """Scarlet Bond: best is AB-only (private, no infohash); the entry's
+    public Nyaa alt must be picked instead of nothing."""
+    from types import SimpleNamespace
+
+    from kodarr.seadex_sweep import pick_best
+
+    def rec(best, public, infohash, group):
+        tracker = SimpleNamespace(is_public=lambda p=public: p)
+        return SimpleNamespace(is_best=best, tracker=tracker, infohash=infohash, release_group=group)
+
+    ab_best = rec(True, False, None, "-ZR-")
+    ab_alt = rec(False, False, None, "Metal")
+    nyaa_alt = rec(False, True, "abc123", "Metal")
+    assert pick_best((ab_best, ab_alt, nyaa_alt)).release_group == "Metal"
+    # public best still wins over public alt
+    nyaa_best = rec(True, True, "def456", "PMR")
+    assert pick_best((nyaa_alt, nyaa_best)).release_group == "PMR"
+    assert pick_best((ab_best, ab_alt)) is None
