@@ -139,7 +139,7 @@ async def write_season(http: httpx.AsyncClient, series: dict[str, Any], media: d
 def write_episode(
     video_path: Path, series: dict[str, Any], episode: int, title: str | None,
     overview: str | None = None, source: str | None = None,
-    aired: str | None = None, rating: float | None = None,
+    aired: str | None = None, rating: float | None = None, still_url: str | None = None,
 ) -> None:
     ep = ET.Element("episodedetails")
     _el(ep, "title", title or f"Episode {episode}")
@@ -147,6 +147,9 @@ def write_episode(
     _el(ep, "episode", episode)
     _el(ep, "aired", aired)
     _el(ep, "rating", rating)
+    # records which TMDB still the local -thumb.jpg came from, so a mapping
+    # correction invalidates the stale image instead of leaving it forever
+    _el(ep, "thumb", still_url)
     # AniDB-style provenance: the release this file came from, visible in the
     # episode info panel (tells BD vs WEB at a glance)
     plot = (overview or "").strip()
@@ -250,8 +253,20 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
                 )
             p = Path(e["file_path"])
             if p.exists():
+                # stale-thumb detection: the previous NFO records the still URL
+                # its -thumb.jpg came from; if the mapping moved, refetch
+                still = info.get("still_url")
+                thumb = p.with_name(p.stem + "-thumb.jpg")
+                old_nfo = p.with_suffix(".nfo")
+                if still and thumb.exists() and old_nfo.exists():
+                    try:
+                        prev = ET.parse(old_nfo).getroot().findtext("thumb")
+                    except ET.ParseError:
+                        prev = None
+                    if prev != still:
+                        thumb.unlink(missing_ok=True)
                 write_episode(p, s, e["absolute_number"], title, info.get("overview"), e["source_name"],
-                              info.get("aired"), info.get("rating"))
-                if info.get("still_url"):
-                    await _download(http, info["still_url"], p.with_name(p.stem + "-thumb.jpg"))
+                              info.get("aired"), info.get("rating"), still)
+                if still:
+                    await _download(http, still, thumb)
         log.info("nfo written", extra={"event": "nfo", "anilist_id": s["anilist_id"], "series": s["title"]})
