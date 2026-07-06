@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS id_map_overrides (
     anilist_id  integer PRIMARY KEY,
     tmdb_season integer                        -- NULL = disable TMDB episode enrichment
 );
+-- entries whose Fribb row is missing entirely still need a tv id to enrich from
+ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_tv_id integer;
+-- absolute episode offset into the TMDB season; overrides the sibling-cour SUM
+-- (TMDB "Specials" seasons interleave recaps, arithmetic placement can't land)
+ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_offset integer;
 
 -- AniList response cache: FINISHED media is immutable (30d TTL), airing 6h.
 -- This is what keeps franchise walks + nfo passes from hammering the API.

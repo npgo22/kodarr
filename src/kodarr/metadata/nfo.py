@@ -214,13 +214,23 @@ async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
             # split cours share one TMDB season; our episode N is TMDB episode
             # N + (episodes of earlier cours in the same TMDB season). This is
             # unrelated to episode_offset, which describes release numbering.
+            # A manual tmdb_offset override wins outright — TMDB "Specials"
+            # seasons interleave recaps/web episodes, so arithmetic can't land.
             cur = await conn.execute(
-                """SELECT COALESCE(SUM(sib.episodes), 0) AS off
-                   FROM series sib JOIN id_map im ON im.anilist_id = sib.anilist_id
-                   WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
-                (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
+                "SELECT tmdb_offset FROM id_map_overrides WHERE anilist_id = %s AND tmdb_offset IS NOT NULL",
+                (s["anilist_id"],),
             )
-            tmdb_off = (await cur.fetchone())["off"]
+            row = await cur.fetchone()
+            if row:
+                tmdb_off = row["tmdb_offset"]
+            else:
+                cur = await conn.execute(
+                    """SELECT COALESCE(SUM(sib.episodes), 0) AS off
+                       FROM series sib JOIN id_map im ON im.anilist_id = sib.anilist_id
+                       WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
+                    (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
+                )
+                tmdb_off = (await cur.fetchone())["off"]
             tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
             for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
                 info = tmdb_eps.get(our_ep + tmdb_off)

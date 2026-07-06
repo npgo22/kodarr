@@ -46,9 +46,17 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
                    VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
                 rows,
             )
-        # manual corrections survive the rewrite
+        # manual corrections survive the rewrite; overrides with a tv id also
+        # cover entries Fribb has no row for at all
         await conn.execute(
-            """UPDATE id_map m SET tmdb_season = o.tmdb_season
+            """INSERT INTO id_map (anilist_id, tmdb_tv_id, tmdb_season)
+               SELECT anilist_id, tmdb_tv_id, tmdb_season FROM id_map_overrides
+               WHERE tmdb_tv_id IS NOT NULL
+               ON CONFLICT (anilist_id) DO NOTHING"""
+        )
+        await conn.execute(
+            """UPDATE id_map m SET tmdb_season = o.tmdb_season,
+                                   tmdb_tv_id  = COALESCE(o.tmdb_tv_id, m.tmdb_tv_id)
                FROM id_map_overrides o WHERE o.anilist_id = m.anilist_id"""
         )
     log.info("id mapping refreshed", extra={"event": "mapping_refresh", "rows": len(rows)})
