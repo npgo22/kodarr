@@ -413,3 +413,13 @@ def test_pick_best_falls_back_to_public_alt():
     nyaa_best = rec(True, True, "def456", "PMR")
     assert pick_best((nyaa_alt, nyaa_best)).release_group == "PMR"
     assert pick_best((ab_best, ab_alt)) is None
+
+
+def test_movie_search_query_has_no_episode_number():
+    # movies store as "episode 1" but releases carry no number: "Suzume 01"
+    # finds nothing on nyaa; the bare title must be searched.
+    from kodarr.acquire.backfill import search_query
+    assert search_query("Suzume no Tojimari", 1, "MOVIE", 0) == "Suzume no Tojimari"
+    # series still get the zero-padded episode
+    assert search_query("Sousou no Frieren", 5, "TV", 0) == "Sousou no Frieren 05"
+    assert search_query("Sousou no Frieren", 2, "TV", 28) == "Sousou no Frieren 30"

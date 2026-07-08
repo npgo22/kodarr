@@ -16,6 +16,15 @@ from kodarr.clients import Qbit
 log = logging.getLogger(__name__)
 
 
+def search_query(title: str, ep: int | None, fmt: str, episode_offset: int) -> str:
+    """Nyaa query for one title. Movies are detected/stored as "episode 1" but
+    release names carry no episode number — search the bare title, never
+    "Title 01" (which finds nothing)."""
+    if ep is None or fmt == "MOVIE":
+        return title
+    return f"{title} {ep + episode_offset:02d}"
+
+
 def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> list[tuple[tuple, dict]]:
     """Preferred-group releases for this exact series+episode; 1080p floor;
     best resolution first, seeders break ties."""
@@ -92,7 +101,7 @@ async def backfill_series(
         ranked = []
         best = None
         for title in titles:
-            query = title if ep is None else f"{title} {ep + series['episode_offset']:02d}"
+            query = search_query(title, ep, series["format"], series["episode_offset"])
             try:
                 results = await rss.nyaa_search(http, query, nyaa_url)
             except Exception as e:

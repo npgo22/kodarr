@@ -52,7 +52,14 @@ async def import_path(
             continue
 
         row, episode = series, None
-        if row is not None:
+        if row is not None and row["format"] == "MOVIE":
+            # a movie grab IS the movie however the release names it — SeaDex
+            # indexes movies as franchise specials (e.g. S00E09), so the season/
+            # episode gate below would wrongly reject or misroute it.
+            # ponytail: single feature file assumed; a multi-file movie pack with
+            # extras would need largest-file selection.
+            episode = None
+        elif row is not None:
             if parsed.season == 0:
                 # S00 extras inside a season pack belong to a different AniList
                 # entry (specials are their own entry) — never this one
