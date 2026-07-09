@@ -291,7 +291,9 @@ def build_app(daemon, token: str) -> web.Application:
         return web.Response(text="ok")
 
     async def autobrr(request):
-        got = request.headers.get("X-Kodarr-Token", "")
+        # autobrr's WEBHOOK action can't send custom headers, so also accept the
+        # token via ?apikey= (the same convention the /api/v3 arr API uses).
+        got = request.headers.get("X-Kodarr-Token") or request.query.get("apikey") or ""
         if token and not hmac.compare_digest(got, token):
             return web.Response(status=401)
         try:
