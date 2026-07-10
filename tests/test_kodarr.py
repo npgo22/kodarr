@@ -74,6 +74,20 @@ def test_digit_title_not_read_as_season():
     assert m and m[0]["anilist_id"] == 116589 and m[1] == 3
 
 
+def test_strip_season_reduces_sequel_to_base():
+    # groups release "Youjo Senki II" as "Youjo Senki S2 - NN": a backfill query
+    # must drop the AniList cour marker or nyaa full-text AND-match finds nothing.
+    n = lambda t: match._strip_season(match.normalize(t))
+    assert n("Youjo Senki II") == "youjo senki"
+    assert n("Mushoku Tensei III") == "mushoku tensei"
+    assert n("Some Show S2") == "some show"
+    assert n("Some Show 2nd Season") == "some show"
+    assert n("Re:ZERO Season 4") == "re zero"
+    # must NOT strip a number that is part of the name
+    assert n("86") == "86"
+    assert n("Mob Psycho 100") == "mob psycho 100"
+
+
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
 SLIME = [  # real entries: split-cour franchise with absolute-numbered releases
     {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},

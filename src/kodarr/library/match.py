@@ -13,6 +13,12 @@ VIDEO_EXTS = {".mkv", ".mp4", ".avi"}
 # "2nd Season", "Season 3", "3rd season" — how AniList encodes cours in a title.
 _SEASON_RE = re.compile(r"\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b|\bseason\s+(\d+)\b")
 
+# A trailing cour marker AniList spells differently from release groups: "Youjo
+# Senki II" is released as "[SubsPlease] Youjo Senki S2 - NN". Strip it (roman
+# II–IV, bare "S2", or "2nd") so a sequel query reduces to the franchise base and
+# the group's release-name still matches. Runs on normalize()d (lowercase) input.
+_SEASON_SUFFIX_RE = re.compile(r"\s+(?:ii|iii|iv|s\d+|\d+(?:st|nd|rd|th))$")
+
 
 def normalize(title: str) -> str:
     """Lowercase, drop punctuation, collapse whitespace — for title comparison."""
@@ -22,8 +28,11 @@ def normalize(title: str) -> str:
 
 
 def _strip_season(name: str) -> str:
-    """Drop a trailing 'Season N' / 'Nth Season' so sequel titles reduce to the base."""
-    return " ".join(_SEASON_RE.sub("", name).split())
+    """Drop a trailing 'Season N' / 'Nth Season' / 'II' / 'S2' so sequel titles
+    reduce to the base for search."""
+    name = _SEASON_RE.sub("", name)
+    name = _SEASON_SUFFIX_RE.sub("", name)
+    return " ".join(name.split())
 
 
 def _entry_season(names: set[str]) -> int:
