@@ -34,16 +34,17 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
             t = tmdb.get("tv")
             tv = t[0] if isinstance(t, list) and t else t if isinstance(t, int) else None
         tvdb = e.get("tvdb_id")
-        if not tvdb and not movie and not tv:
+        anidb = e.get("anidb_id")
+        if not tvdb and not movie and not tv and not anidb:
             continue
         season = e.get("season") or {}
-        rows.append((anilist_id, tvdb, movie, season.get("tvdb"), tv, season.get("tmdb")))
+        rows.append((anilist_id, tvdb, movie, season.get("tvdb"), tv, season.get("tmdb"), anidb))
     async with conn.transaction():
         await conn.execute("DELETE FROM id_map")
         async with conn.cursor() as cur:
             await cur.executemany(
-                """INSERT INTO id_map (anilist_id, tvdb_id, tmdb_movie_id, tvdb_season, tmdb_tv_id, tmdb_season)
-                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
+                """INSERT INTO id_map (anilist_id, tvdb_id, tmdb_movie_id, tvdb_season, tmdb_tv_id, tmdb_season, anidb_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (anilist_id) DO NOTHING""",
                 rows,
             )
         # manual corrections survive the rewrite; overrides with a tv id also
@@ -63,8 +64,11 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
 
 
 async def refresh_if_stale(conn: AsyncConnection, http: httpx.AsyncClient, days: int = 7) -> None:
+    # also re-refresh when anidb_id is unpopulated (column added after the last
+    # refresh) so the title-synonyms feed self-heals without an operational step
     cur = await conn.execute(
-        "SELECT 1 FROM id_map WHERE updated_at > now() - make_interval(days => %s) LIMIT 1", (days,)
+        "SELECT 1 FROM id_map WHERE updated_at > now() - make_interval(days => %s) AND anidb_id IS NOT NULL LIMIT 1",
+        (days,),
     )
     if await cur.fetchone() is None:
         await refresh(conn, http)

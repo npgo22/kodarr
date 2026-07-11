@@ -40,18 +40,18 @@ async def add_series(conn: AsyncConnection, media: dict, root_path: str) -> None
 
 
 def _merge_synonyms(row: dict) -> dict:
-    """Append manami-project aliases to the AniList synonyms. AniList ones stay
+    """Append AniDB title aliases to the AniList synonyms. AniList ones stay
     first so synonyms[0] remains the romaji base backfill builds its query
     from; the extras only widen what the matcher will accept."""
-    extra = row.pop("_manami", None) or []
+    extra = row.pop("_extra_synonyms", None) or []
     row["synonyms"] = list(dict.fromkeys([*row["synonyms"], *extra]))
     return row
 
 
-# manami synonyms are joined in (not stored on series) so a weekly refresh takes
+# AniDB aliases are joined in (not stored on series) so a weekly refresh takes
 # effect immediately and series.synonyms stays purely AniList-sourced
-_WITH_SYNONYMS = """SELECT s.*, COALESCE(m.synonyms, '{}') AS _manami
-                    FROM series s LEFT JOIN manami_synonyms m USING (anilist_id)"""
+_WITH_SYNONYMS = """SELECT s.*, COALESCE(t.synonyms, '{}') AS _extra_synonyms
+                    FROM series s LEFT JOIN title_synonyms t USING (anilist_id)"""
 
 
 async def monitored_series(conn: AsyncConnection) -> list[dict]:

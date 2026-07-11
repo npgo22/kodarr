@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS id_map (
 CREATE INDEX IF NOT EXISTS id_map_tvdb_idx ON id_map (tvdb_id);
 ALTER TABLE id_map ADD COLUMN IF NOT EXISTS tmdb_tv_id  integer;
 ALTER TABLE id_map ADD COLUMN IF NOT EXISTS tmdb_season integer;
+ALTER TABLE id_map ADD COLUMN IF NOT EXISTS anidb_id    integer;  -- keys the AniDB title-synonyms feed
 CREATE INDEX IF NOT EXISTS id_map_tmdb_idx ON id_map (tmdb_movie_id);
 
 ALTER TABLE episodes ADD COLUMN IF NOT EXISTS source_name text;  -- original release filename (what was downloaded)
@@ -76,15 +77,16 @@ ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_tv_id integer;
 -- (TMDB "Specials" seasons interleave recaps, arithmetic placement can't land)
 ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_offset integer;
 
--- extra title aliases from manami-project/anime-offline-database (aggregates
--- AniDB/MAL/Kitsu/AnimePlanet names AniList doesn't list). Merged into
--- series.synonyms at read time so release matching accepts alternate namings.
--- Refreshed weekly alongside the Fribb id map.
-CREATE TABLE IF NOT EXISTS manami_synonyms (
+-- extra title aliases from the AniDB anime-titles dump (every language +
+-- official + synonym AniList doesn't list), keyed to AniList via id_map.anidb_id.
+-- Merged into series.synonyms at read time so release matching accepts alternate
+-- namings. Refreshed weekly after the Fribb id map.
+CREATE TABLE IF NOT EXISTS title_synonyms (
     anilist_id integer PRIMARY KEY,
     synonyms   text[] NOT NULL DEFAULT '{}',
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+DROP TABLE IF EXISTS manami_synonyms;  -- superseded (manami-project archived 2026-07)
 
 -- AniList response cache: FINISHED media is immutable (30d TTL), airing 6h.
 -- This is what keeps franchise walks + nfo passes from hammering the API.

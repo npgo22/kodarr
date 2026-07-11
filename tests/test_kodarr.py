@@ -88,16 +88,19 @@ def test_strip_season_reduces_sequel_to_base():
     assert n("Mob Psycho 100") == "mob psycho 100"
 
 
-def test_manami_extract():
+def test_anidb_synonyms_parse():
     from kodarr.metadata import synonyms
-    e = {
-        "sources": ["https://myanimelist.net/anime/9756", "https://anilist.co/anime/9756"],
-        "title": "Mahou Shoujo Madoka☆Magica",
-        "synonyms": ["Puella Magi Madoka Magica", "魔法少女まどか☆マギカ"],
-    }
-    assert synonyms._extract(e) == (9756, ["Mahou Shoujo Madoka☆Magica", "Puella Magi Madoka Magica", "魔法少女まどか☆マギカ"])
-    # no AniList source -> skipped (kodarr is AniList-keyed)
-    assert synonyms._extract({"sources": ["https://kitsu.io/anime/x"], "title": "X"}) is None
+    dump = "\n".join([
+        "# <aid>|<type>|<language>|<title>",
+        "1234|1|x-jat|Youjo Senki",              # primary romaji -> keep
+        "1234|2|en|The Saga of Tanya the Evil",  # english synonym -> keep
+        "1234|4|ja|幼女戦記",                     # official native -> keep
+        "1234|2|ru|Военная хроника",             # other language -> drop (matcher noise)
+        "1234|3|x-jat|YS",                       # short abbreviation -> drop
+        "9999|1|x-jat|Unmapped",                 # aid not in the map -> drop
+    ])
+    got = synonyms._parse(dump, {1234: 42})
+    assert got == {42: ["Youjo Senki", "The Saga of Tanya the Evil", "幼女戦記"]}
 
 
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
