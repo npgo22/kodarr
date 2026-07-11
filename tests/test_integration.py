@@ -271,6 +271,12 @@ def test_arr_api_for_seerr(postgres, tmp_path):
         assert r.status == 201
         await asyncio.gather(*d._bg)  # adds run in the background
         assert await db.get_series(conn, 101280) is not None
+
+        # seerr "Remove from Sonarr" (deleteFiles omitted -> keep files)
+        r = await client.delete("/api/v3/series/352408", headers=h)
+        assert r.status == 200
+        assert await db.get_series(conn, 101280) is None
+        assert (await client.delete("/api/v3/series/352408", headers=h)).status == 404  # gone now
         await client.close()
 
     asyncio.run(main())

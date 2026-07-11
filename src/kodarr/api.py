@@ -207,6 +207,36 @@ class ArrApi:
         log.info("seerr add done", extra={"event": "request", "tvdb": tvdb_id, "added": added})
         return added
 
+    async def series_delete(self, request):
+        # seerr's "Remove from Sonarr": {id} is the tvdb id (= _series_shape id).
+        # deleteFiles honours the dialog's checkbox; the row delete cascades to
+        # episodes/grabs (FK ON DELETE CASCADE), same as `kodarr remove`.
+        tvdb_id = int(request.match_info["id"])
+        ids = [e["anilist_id"] for e in await self._tvdb_entries(tvdb_id) if e["in_library"]]
+        if not ids:
+            raise web.HTTPNotFound
+        if request.query.get("deleteFiles") == "true":
+            await self._delete_files(ids)
+        await self.d.conn.execute("DELETE FROM series WHERE anilist_id = ANY(%s)", (ids,))
+        log.info("seerr delete", extra={"event": "delete", "tvdb": tvdb_id, "anilist_ids": ids,
+                                        "files": request.query.get("deleteFiles") == "true"})
+        return web.json_response({})
+
+    async def _delete_files(self, anilist_ids: list[int]) -> None:
+        import shutil
+        from kodarr import db
+        from kodarr.library import organize
+
+        for aid in anilist_ids:
+            row = await db.get_series(self.d.conn, aid)
+            if not row:
+                continue
+            shutil.rmtree(organize.series_dir(row), ignore_errors=True)  # Season NN dir, or movie folder
+            if row["format"] != "MOVIE":  # drop the franchise show folder once no seasons remain
+                show = organize.series_dir(row).parent
+                if show.exists() and not any(show.glob("Season *")):
+                    shutil.rmtree(show, ignore_errors=True)
+
     # -- radarr: tmdb-keyed movies ---------------------------------------
     async def _movie_row(self, tmdb_id: int) -> dict | None:
         cur = await self.d.conn.execute(
@@ -282,6 +312,18 @@ class ArrApi:
         self.d.run_bg(self.d.process_new([anilist_id]))
         log.info("seerr add done", extra={"event": "request", "tmdb_movie": tmdb_id, "anilist_id": anilist_id})
 
+    async def movie_delete(self, request):
+        # seerr's "Remove from Radarr": {id} is the tmdb movie id.
+        tmdb_id = int(request.match_info["id"])
+        row = await self._movie_row(tmdb_id)
+        if not row:
+            raise web.HTTPNotFound
+        if request.query.get("deleteFiles") == "true":
+            await self._delete_files([row["anilist_id"]])
+        await self.d.conn.execute("DELETE FROM series WHERE anilist_id = %s", (row["anilist_id"],))
+        log.info("seerr delete", extra={"event": "delete", "tmdb_movie": tmdb_id, "anilist_id": row["anilist_id"]})
+        return web.json_response({})
+
 
 def build_app(daemon, token: str) -> web.Application:
     """The single aiohttp app: /healthz, /webhook/autobrr, /api/v3/*."""
@@ -332,8 +374,10 @@ def build_app(daemon, token: str) -> web.Application:
     r.add_post("/api/v3/series", api.series_add)
     # seerr PUTs the full series with newly-monitored seasons on follow-up requests
     r.add_put("/api/v3/series/{id}", api.series_add)
+    r.add_delete("/api/v3/series/{id}", api.series_delete)  # seerr "Remove from Sonarr"
     r.add_get("/api/v3/movie/lookup", api.movie_lookup)
     r.add_get("/api/v3/movie", api.movie_list)
     r.add_get("/api/v3/movie/{id}", api.movie_get)
     r.add_post("/api/v3/movie", api.movie_add)
+    r.add_delete("/api/v3/movie/{id}", api.movie_delete)  # seerr "Remove from Radarr"
     return app
