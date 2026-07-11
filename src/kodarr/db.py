@@ -61,7 +61,8 @@ async def monitored_series(conn: AsyncConnection) -> list[dict]:
 
 async def get_series(conn: AsyncConnection, anilist_id: int) -> dict | None:
     cur = await conn.execute(_WITH_SYNONYMS + " WHERE s.anilist_id = %s", (anilist_id,))
-    return _merge_synonyms(await cur.fetchone())
+    row = await cur.fetchone()
+    return _merge_synonyms(row) if row else None
 
 
 async def get_episode(conn: AsyncConnection, anilist_id: int, absolute_number: int) -> dict | None:
