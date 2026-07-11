@@ -16,6 +16,7 @@ from kodarr import db
 from kodarr.acquire import announce as grab
 from kodarr.library import importer
 from kodarr.metadata import mapping
+from kodarr.metadata import synonyms
 from kodarr.metadata import nfo
 from kodarr.acquire import feeds as rss
 from kodarr.acquire import backfill as search
@@ -146,6 +147,7 @@ class Daemon:
 
     async def mapping_pass(self) -> None:
         await mapping.refresh_if_stale(self.conn, self.http)
+        await synonyms.refresh_if_stale(self.conn, self.http)
 
     async def nfo_pass(self) -> None:
         # picks up newly-published episode titles/art for airing shows

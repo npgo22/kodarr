@@ -39,14 +39,29 @@ async def add_series(conn: AsyncConnection, media: dict, root_path: str) -> None
     )
 
 
+def _merge_synonyms(row: dict) -> dict:
+    """Append manami-project aliases to the AniList synonyms. AniList ones stay
+    first so synonyms[0] remains the romaji base backfill builds its query
+    from; the extras only widen what the matcher will accept."""
+    extra = row.pop("_manami", None) or []
+    row["synonyms"] = list(dict.fromkeys([*row["synonyms"], *extra]))
+    return row
+
+
+# manami synonyms are joined in (not stored on series) so a weekly refresh takes
+# effect immediately and series.synonyms stays purely AniList-sourced
+_WITH_SYNONYMS = """SELECT s.*, COALESCE(m.synonyms, '{}') AS _manami
+                    FROM series s LEFT JOIN manami_synonyms m USING (anilist_id)"""
+
+
 async def monitored_series(conn: AsyncConnection) -> list[dict]:
-    cur = await conn.execute("SELECT * FROM series WHERE monitored")
-    return await cur.fetchall()
+    cur = await conn.execute(_WITH_SYNONYMS + " WHERE s.monitored")
+    return [_merge_synonyms(r) for r in await cur.fetchall()]
 
 
 async def get_series(conn: AsyncConnection, anilist_id: int) -> dict | None:
-    cur = await conn.execute("SELECT * FROM series WHERE anilist_id = %s", (anilist_id,))
-    return await cur.fetchone()
+    cur = await conn.execute(_WITH_SYNONYMS + " WHERE s.anilist_id = %s", (anilist_id,))
+    return _merge_synonyms(await cur.fetchone())
 
 
 async def get_episode(conn: AsyncConnection, anilist_id: int, absolute_number: int) -> dict | None:

@@ -88,6 +88,18 @@ def test_strip_season_reduces_sequel_to_base():
     assert n("Mob Psycho 100") == "mob psycho 100"
 
 
+def test_manami_extract():
+    from kodarr.metadata import synonyms
+    e = {
+        "sources": ["https://myanimelist.net/anime/9756", "https://anilist.co/anime/9756"],
+        "title": "Mahou Shoujo Madoka☆Magica",
+        "synonyms": ["Puella Magi Madoka Magica", "魔法少女まどか☆マギカ"],
+    }
+    assert synonyms._extract(e) == (9756, ["Mahou Shoujo Madoka☆Magica", "Puella Magi Madoka Magica", "魔法少女まどか☆マギカ"])
+    # no AniList source -> skipped (kodarr is AniList-keyed)
+    assert synonyms._extract({"sources": ["https://kitsu.io/anime/x"], "title": "X"}) is None
+
+
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
 SLIME = [  # real entries: split-cour franchise with absolute-numbered releases
     {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},

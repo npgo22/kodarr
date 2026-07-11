@@ -76,6 +76,16 @@ ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_tv_id integer;
 -- (TMDB "Specials" seasons interleave recaps, arithmetic placement can't land)
 ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS tmdb_offset integer;
 
+-- extra title aliases from manami-project/anime-offline-database (aggregates
+-- AniDB/MAL/Kitsu/AnimePlanet names AniList doesn't list). Merged into
+-- series.synonyms at read time so release matching accepts alternate namings.
+-- Refreshed weekly alongside the Fribb id map.
+CREATE TABLE IF NOT EXISTS manami_synonyms (
+    anilist_id integer PRIMARY KEY,
+    synonyms   text[] NOT NULL DEFAULT '{}',
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- AniList response cache: FINISHED media is immutable (30d TTL), airing 6h.
 -- This is what keeps franchise walks + nfo passes from hammering the API.
 CREATE TABLE IF NOT EXISTS anilist_cache (
