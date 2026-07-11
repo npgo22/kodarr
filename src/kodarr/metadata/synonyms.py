@@ -18,8 +18,11 @@ from psycopg import AsyncConnection
 
 log = logging.getLogger(__name__)
 
-# minified = identical data without the pretty-print whitespace (~1/3 the size)
-URL = "https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database-minified.json"
+# Published as weekly-tagged GitHub release assets (not committed to the repo);
+# /releases/latest/download/ redirects to the current week's asset. Minified =
+# same data without pretty-print whitespace. Needs an http client with
+# follow_redirects (release downloads 302 to objects.githubusercontent.com).
+URL = "https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json"
 
 _ANILIST_RE = re.compile(r"anilist\.co/anime/(\d+)")
 
