@@ -61,9 +61,22 @@ async def import_path(
             episode = None
         elif row is not None:
             if parsed.season == 0:
-                # S00 extras inside a season pack belong to a different AniList
-                # entry (specials are their own entry) — never this one
-                log.info("skip pack special", extra={"event": "skip", "file": src.name})
+                # S00 extras (OVAs, recaps) ride along in a season/BD batch but
+                # aren't a monitored entry of their own. Drop them in the show's
+                # Specials (Season 00) folder so Jellyfin surfaces them instead of
+                # silently discarding files we already downloaded. Not tracked in
+                # the episodes table: their upstream numbering would collide with
+                # real episodes on the (anilist_id, absolute_number) key.
+                sp_row = {**row, "season": 0}
+                sp_ep = parsed.episode or 1
+                sp = organize.dest_path(sp_row, sp_ep, parsed.group, src.suffix.lower())
+                if not sp.exists():
+                    organize.import_file(src, sp)
+                    nfo.write_episode(sp, sp_row, sp_ep, None, source=src.name)
+                    touched_dirs.add(str(sp.parent))
+                    log.info("imported special", extra={
+                        "event": "import", "file": src.name,
+                        "anilist_id": row["anilist_id"], "episode": sp_ep})
                 continue
             if parsed.episode is not None:
                 episode = parsed.episode - row["episode_offset"]

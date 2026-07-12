@@ -193,6 +193,32 @@ def test_stale_grab_expiry(postgres, tmp_path):
 
 
 
+def test_pack_special_lands_in_specials(postgres, tmp_path):
+    """A season/BD batch carrying an S00 extra: the real episode imports and
+    the special is filed under Season 00 (not silently discarded)."""
+    from kodarr.library import importer
+
+    async def main():
+        conn = await fresh_conn()
+        media, root = series_row(tmp_path, episodes=12, aired=12)
+        await db.add_series(conn, media, root)
+        row = await db.get_series(conn, 154587)
+
+        pack = tmp_path / "pack"
+        pack.mkdir()
+        (pack / "[Thighs] Sousou no Frieren - 03 (BD 1080p).mkv").write_bytes(b"v")
+        (pack / "Sousou no Frieren S00E02 (BD 1080p).mkv").write_bytes(b"v")
+
+        n = await importer.import_path(conn, None, pack, series=row)
+        assert n == 1  # only the real episode is tracked in the episodes table
+        assert await db.get_episode(conn, 154587, 3) is not None
+        show = Path(root) / "Frieren Beyond Journey's End (2023) [anilist-154587]"
+        specials = list((show / "Season 00").glob("*.mkv"))
+        assert specials and "S00E002" in specials[0].name, "special not filed under Specials"
+
+    asyncio.run(main())
+
+
 def test_backfill_ranking_retry_backoff(postgres, tmp_path):
     """Preferred-group 1080p wins; failed grabs retry; backoff skips."""
 
