@@ -149,6 +149,23 @@ def test_anidb_parse_anime():
     assert by["T1"]["type"] == 4  # trailers carried but typed, never counted as episodes
 
 
+def test_aligned_regulars_skips_wrapper():
+    from kodarr.metadata.anidb import aligned_regulars
+    # Zoku pattern: AniDB numbers the combined broadcast alongside its parts
+    rows = [
+        {"number": 1, "type": 1, "title_en": "Complete Movie", "length_min": 144},
+        {"number": 2, "type": 1, "title_en": "Part 1 of 6", "length_min": 25},
+        {"number": 3, "type": 1, "title_en": "Part 2 of 6", "length_min": 25},
+        {"number": 1, "type": 2, "title_en": "A Special", "length_min": 25},
+        {"number": 4, "type": 1, "title_en": "Part 3 of 6", "length_min": None},
+    ]
+    a = aligned_regulars(rows)
+    assert [a[n]["title_en"] for n in sorted(a)] == ["Part 1 of 6", "Part 2 of 6", "Part 3 of 6"]
+    # no wrapper: identity mapping
+    plain = [{"number": n, "type": 1, "title_en": f"E{n}", "length_min": 25} for n in (1, 2, 3)]
+    assert [aligned_regulars(plain)[n]["title_en"] for n in (1, 2, 3)] == ["E1", "E2", "E3"]
+
+
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
 SLIME = [  # real entries: split-cour franchise with absolute-numbered releases
     {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},

@@ -63,6 +63,19 @@ def parse_anime(xml_text: str) -> dict:
     }
 
 
+def aligned_regulars(rows: list[dict]) -> dict[int, dict]:
+    """{library episode number: AniDB regular-episode row}, skipping 'wrapper'
+    entries — AniDB numbers a combined broadcast (Zoku's 'Complete Movie',
+    Neko's 'TV Special') alongside its parts, shifting everything by one.
+    A wrapper is detectable by runtime: >= 2.5x the median regular length."""
+    regs = sorted((r for r in rows if r["type"] == 1), key=lambda r: r["number"])
+    lens = sorted(r["length_min"] for r in regs if r["length_min"])
+    med = lens[len(lens) // 2] if lens else None
+    if med:
+        regs = [r for r in regs if not (r["length_min"] and r["length_min"] >= 2.5 * med)]
+    return {i + 1: r for i, r in enumerate(regs)}
+
+
 async def ensure_cache(http: httpx.AsyncClient, path: Path) -> Path | None:
     """Download/refresh the Shoko zip. Returns the path, or None on failure."""
     if path.exists() and time.time() - path.stat().st_mtime < CACHE_MAX_AGE:
@@ -130,7 +143,7 @@ async def resolve_series(conn: AsyncConnection, s: dict, anidb_id: int, anime: d
         # E0 (recap marker) — there the broadcast episodes are typed as AniDB
         # SPECIALS (Owarimonogatari S2: 7 eps on TV, AniDB regular count 2), so
         # the regular count is meaningless for our numbering.
-        regular = sum(1 for e in anime["episodes"] if e["type"] == 1)
+        regular = len(aligned_regulars(anime["episodes"]))
         pairs = ((am or {}).get("season_map") or {}).get("pairs") or {}
         recapish = any(v == 0 for v in pairs.values())
         if recapish:

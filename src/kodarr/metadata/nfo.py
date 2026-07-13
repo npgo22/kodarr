@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 
+from kodarr.metadata import anidb
 from kodarr.metadata import anilist
 from kodarr import db
 from kodarr.library import organize
@@ -212,15 +213,16 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
     titles: dict[int, dict] = {int(n): {"title": t} for n, t in media["episode_titles"].items()}
     if idmap and idmap.get("anidb_id"):
         cur = await conn.execute(
-            "SELECT number, title_en, airdate FROM anidb_episodes WHERE anidb_id = %s AND type = 1",
+            "SELECT number, type, title_en, airdate, length_min FROM anidb_episodes WHERE anidb_id = %s",
             (idmap["anidb_id"],),
         )
-        regulars = await cur.fetchall()
+        anidb_rows = await cur.fetchall()
         # fill-only: AniList's CR-sourced titles ("Tsubasa Family, Part 1") beat
         # AniDB's structural ones ("Part 1 of 4"); AniDB contributes airdates +
-        # titles AniList lacks
-        for e in regulars:
-            info = titles.setdefault(e["number"], {})
+        # titles AniList lacks. aligned_regulars skips combined-broadcast
+        # wrapper entries so part numbering matches ours.
+        for n, e in anidb.aligned_regulars(anidb_rows).items():
+            info = titles.setdefault(n, {})
             if e["title_en"] and not info.get("title"):
                 info["title"] = e["title_en"]
             if e["airdate"]:
@@ -232,10 +234,7 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
         am_row = await cur.fetchone()
         in_season = ((am_row or {}).get("special_map") or {}).get("in_season") or {}
         if in_season:
-            cur = await conn.execute(
-                "SELECT number, title_en, airdate FROM anidb_episodes WHERE anidb_id = %s AND type = 2",
-                (idmap["anidb_id"],))
-            sp = {e["number"]: e for e in await cur.fetchall()}
+            sp = {e["number"]: e for e in anidb_rows if e["type"] == 2}
             for tvdb_ep, sp_num in in_season.items():
                 e = sp.get(sp_num)
                 if e is None:
