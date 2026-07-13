@@ -103,6 +103,42 @@ def test_anidb_synonyms_parse():
     assert got == {42: ["Youjo Senki", "The Saga of Tanya the Evil", "幼女戦記"]}
 
 
+def test_animelists_parse():
+    from kodarr.metadata import animelists
+    xml = """<anime-list>
+      <anime anidbid="17236" tvdbid="371310" defaulttvdbseason="2">
+        <mapping-list><mapping anidbseason="0" tvdbseason="0">;1-2;2-0;</mapping></mapping-list>
+      </anime>
+      <anime anidbid="18104" tvdbid="371310" defaulttvdbseason="2" episodeoffset="12"/>
+      <anime anidbid="99" tvdbid="movie"/>
+      <anime tvdbid="777"/>
+    </anime-list>"""
+    rows = {r[0]: r for r in animelists.parse(xml)}
+    assert rows[17236][3] == 0 and rows[17236][4] == {"1": 2, "2": 0}
+    assert rows[18104][3] == 12 and rows[18104][4] == {}
+    assert rows[99][1] == "movie"
+    assert len(rows) == 3  # entry without anidbid dropped
+
+
+def test_anidb_parse_anime():
+    from kodarr.metadata import anidb
+    xml = """<anime id="17236"><type>TV Series</type><episodecount>12</episodecount>
+      <startdate>2023-07-10</startdate><enddate>2023-09-25</enddate>
+      <episodes>
+        <episode id="267538"><epno type="1">1</epno><length>25</length><airdate>2023-07-10</airdate>
+          <title xml:lang="en">The Brokenhearted Mage</title><title xml:lang="x-jat">Shitsui no Majutsushi</title></episode>
+        <episode id="268721"><epno type="2">S1</epno><airdate>2023-07-03</airdate>
+          <title xml:lang="en">Guardian Fitz</title></episode>
+        <episode id="256846"><epno type="4">T1</epno><title xml:lang="en">Teaser PV</title></episode>
+      </episodes></anime>"""
+    a = anidb.parse_anime(xml)
+    assert a["episodecount"] == 12 and a["enddate"] == "2023-09-25"
+    by = {e["epno"]: e for e in a["episodes"]}
+    assert by["1"]["type"] == 1 and by["1"]["title_en"] == "The Brokenhearted Mage"
+    assert by["S1"]["type"] == 2 and by["S1"]["number"] == 1 and by["S1"]["airdate"] == "2023-07-03"
+    assert by["T1"]["type"] == 4  # trailers carried but typed, never counted as episodes
+
+
 _S = {"format": "TV", "episode_offset": 0, "preferred_group": "SubsPlease"}
 SLIME = [  # real entries: split-cour franchise with absolute-numbered releases
     {**_S, "anilist_id": 101280, "title": "That Time I Got Reincarnated as a Slime", "episodes": 24, "aired": 24, "synonyms": ["Tensei Shitara Slime Datta Ken", "TenSura"]},

@@ -24,6 +24,8 @@ class Config:
     qbit_pass: str
     qbit_category: str
     tmdb_api_key: str = ""
+    anidb_cache: str = "/data/.kodarr-cache"  # Shoko Anime_HTTP.zip lives here (media PVC)
+    anidb_client: str = ""  # registered AniDB HTTP-API client name; empty = cache-only
     rss_feeds: list[str] = field(default_factory=list)
     rss_interval: int = 600
     preferred_groups: list[str] = field(default_factory=lambda: ["SubsPlease"])
@@ -60,6 +62,8 @@ def load(path: str | Path = "config.toml") -> Config:
         qbit_pass=_env("QBIT_PASS", get("qbittorrent", "pass")),
         qbit_category=get("qbittorrent", "category", "kodarr"),
         tmdb_api_key=_env("TMDB_API_KEY", get("tmdb", "api_key")),
+        anidb_cache=get("anidb", "cache_dir", "/data/.kodarr-cache"),
+        anidb_client=get("anidb", "client", ""),
         rss_feeds=get("rss", "feeds", ["https://subsplease.org/rss/?r=1080"]),
         rss_interval=int(get("rss", "interval", 600)),
         preferred_groups=get("groups", "preferred", ["SubsPlease"]),

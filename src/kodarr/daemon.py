@@ -15,6 +15,8 @@ from kodarr.metadata import anilist
 from kodarr import db
 from kodarr.acquire import announce as grab
 from kodarr.library import importer
+from kodarr.metadata import anidb
+from kodarr.metadata import animelists
 from kodarr.metadata import mapping
 from kodarr.metadata import synonyms
 from kodarr.metadata import nfo
@@ -148,6 +150,10 @@ class Daemon:
     async def mapping_pass(self) -> None:
         await mapping.refresh_if_stale(self.conn, self.http)
         await synonyms.refresh_if_stale(self.conn, self.http)
+        await animelists.refresh_if_stale(self.conn, self.http)
+        # background AniDB queue: series added before their AniDB data existed
+        # (or before the id map knew their anidb_id) resolve here and self-heal
+        await anidb.resolve_pass(self.conn, self.http, self.cfg.anidb_cache, self.cfg.anidb_client)
 
     async def nfo_pass(self) -> None:
         # picks up newly-published episode titles/art for airing shows

@@ -29,6 +29,39 @@ def _video_files(path: Path) -> list[Path]:
     )
 
 
+async def special_slot(conn: AsyncConnection, anilist_id: int, sp_num: int) -> tuple[int, str | None]:
+    """(display number, title) for special #sp_num: the anime-lists TVDB S0
+    episode slot + the AniDB special's title, falling back to the raw number."""
+    cur = await conn.execute(
+        """SELECT am.special_map, ae.title_en
+           FROM id_map m
+           LEFT JOIN anidb_map am USING (anidb_id)
+           LEFT JOIN anidb_episodes ae ON ae.anidb_id = m.anidb_id AND ae.type = 2 AND ae.number = %s
+           WHERE m.anilist_id = %s""",
+        (sp_num, anilist_id),
+    )
+    r = await cur.fetchone()
+    if r is None:
+        return sp_num, None
+    return int((r["special_map"] or {}).get(str(sp_num), sp_num)), r["title_en"]
+
+
+async def _import_special(conn: AsyncConnection, row: dict[str, Any], sp_num: int,
+                          group: str | None, src: Path, touched_dirs: set[str]) -> None:
+    """File special #sp_num of this entry under the show's Season 00."""
+    disp, title = await special_slot(conn, row["anilist_id"], sp_num)
+    sp_row = {**row, "season": 0}
+    dest = organize.dest_path(sp_row, disp, group, src.suffix.lower())
+    if dest.exists():
+        return
+    organize.import_file(src, dest)
+    nfo.write_episode(dest, sp_row, disp, title)
+    touched_dirs.add(str(dest.parent))
+    log.info("imported special", extra={
+        "event": "import", "file": src.name, "anilist_id": row["anilist_id"],
+        "episode": disp, "title": title})
+
+
 async def import_path(
     conn: AsyncConnection,
     jellyfin: Jellyfin | None,
@@ -60,23 +93,20 @@ async def import_path(
             # extras would need largest-file selection.
             episode = None
         elif row is not None:
-            if parsed.season == 0:
-                # S00 extras (OVAs, recaps) ride along in a season/BD batch but
-                # aren't a monitored entry of their own. Drop them in the show's
-                # Specials (Season 00) folder so Jellyfin surfaces them instead of
-                # silently discarding files we already downloaded. Not tracked in
-                # the episodes table: their upstream numbering would collide with
-                # real episodes on the (anilist_id, absolute_number) key.
-                sp_row = {**row, "season": 0}
-                sp_ep = parsed.episode or 1
-                sp = organize.dest_path(sp_row, sp_ep, parsed.group, src.suffix.lower())
-                if not sp.exists():
-                    organize.import_file(src, sp)
-                    nfo.write_episode(sp, sp_row, sp_ep, None)
-                    touched_dirs.add(str(sp.parent))
-                    log.info("imported special", extra={
-                        "event": "import", "file": src.name,
-                        "anilist_id": row["anilist_id"], "episode": sp_ep})
+            if parsed.season == 0 or (
+                parsed.episode is not None and parsed.episode - row["episode_offset"] == 0
+            ):
+                # Specials: an explicit S00 extra in a pack, OR a release
+                # numbered 00 (groups slot a pre-season special before ep 1 —
+                # MTBB "S2 - 00" is Guardian Fitz, not episode 1). Filed under
+                # the show's Season 00 with the AniDB special's title and its
+                # anime-lists TVDB S0 slot so TMDB/TVDB numbering agrees.
+                # Not tracked in the episodes table: special numbering would
+                # collide with real episodes on (anilist_id, absolute_number).
+                # ponytail: a bare 00 is assumed to be special #1; exact ID
+                # needs file hashing.
+                sp_num = parsed.episode if parsed.season == 0 and parsed.episode else 1
+                await _import_special(conn, row, sp_num, parsed.group, src, touched_dirs)
                 continue
             if parsed.episode is not None:
                 episode = parsed.episode - row["episode_offset"]

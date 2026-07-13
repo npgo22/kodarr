@@ -252,6 +252,97 @@ def test_backfill_ranking_retry_backoff(postgres, tmp_path):
     asyncio.run(main())
 
 
+def test_anidb_resolve_and_reconcile(postgres, tmp_path):
+    """The Mushoku bug end-to-end: a wrong manual offset (-1) absorbed the
+    'Guardian Fitz'-style special as episode 1 and shifted every episode.
+    AniDB resolve corrects count+offset from data; reconcile renumbers the
+    files and parks the special in Season 00 at its anime-lists TVDB slot."""
+    import json
+    from types import SimpleNamespace
+
+    from kodarr.config import Config
+    from kodarr.library import organize
+    from kodarr.metadata import anidb
+    from kodarr import cli
+
+    async def main():
+        conn = await fresh_conn()
+        media, root = series_row(
+            tmp_path, anilist_id=900001, title="Fake Show Season 2",
+            episodes=3, aired=3, synonyms=[])
+        await db.add_series(conn, media, root)
+        await conn.execute(
+            "UPDATE series SET episode_offset = -1, season = 2 WHERE anilist_id = 900001")
+        await conn.execute("DELETE FROM id_map")
+        await conn.execute(
+            "INSERT INTO id_map (anilist_id, anidb_id, tmdb_tv_id, tmdb_season) VALUES (900001, 55555, 1, 2)")
+        await conn.execute(
+            "INSERT INTO anidb_map (anidb_id, tvdb_id, default_tvdb_season, episode_offset, special_map) "
+            "VALUES (55555, '1', '2', 0, %s)", (json.dumps({"1": 2}),))
+        # pre-seed the anilist cache (status FINISHED = permanent) so the
+        # reconcile NFO refresh never leaves the test environment
+        payload = {
+            "anilist_id": 900001, "title": "Fake Show Season 2", "year": 2023, "format": "TV",
+            "episodes": 2, "aired": 2, "status": "FINISHED", "synonyms": ["Fake Show Season 2"],
+            "description": "", "score": None, "genres": [], "cover_url": None, "banner_url": None,
+            "studio": None, "premiered": "2023-07-10", "ended": "2023-09-25", "runtime": 24,
+            "source_material": None, "characters": [], "episode_titles": {}, "relations": [],
+        }
+        await conn.execute(
+            "INSERT INTO anilist_cache (anilist_id, payload) VALUES (%s, %s) "
+            "ON CONFLICT (anilist_id) DO UPDATE SET payload = EXCLUDED.payload",
+            (900001, json.dumps(payload)))
+
+        # wrongly-imported state: MTBB 00 (the special) sits at E001, eps shifted
+        s = await db.get_series(conn, 900001)
+        for n, src in ((1, "[MTBB] Fake Show S2 - 00 (BD 1080p).mkv"),
+                       (2, "[MTBB] Fake Show S2 - 01 (BD 1080p).mkv"),
+                       (3, "[MTBB] Fake Show S2 - 02 (BD 1080p).mkv")):
+            p = organize.dest_path(s, n, "MTBB", ".mkv")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"v")
+            await db.upsert_episode(conn, 900001, n, str(p), "MTBB", False, src)
+
+        # AniDB ground truth: 2 regular episodes + special S1 (a stale-zip stand-in)
+        anime = anidb.parse_anime("""<anime id="55555"><episodecount>2</episodecount>
+          <enddate>2023-09-25</enddate><episodes>
+          <episode><epno type="1">1</epno><airdate>2023-07-10</airdate><title xml:lang="en">Ep One</title></episode>
+          <episode><epno type="1">2</epno><airdate>2023-07-17</airdate><title xml:lang="en">Ep Two</title></episode>
+          <episode><epno type="2">S1</epno><airdate>2023-07-03</airdate><title xml:lang="en">The Special</title></episode>
+          </episodes></anime>""")
+        await anidb.resolve_series(conn, s, 55555, anime)
+        s = await db.get_series(conn, 900001)
+        assert s["episodes"] == 2, "AniDB regular count must beat AniList's"
+        assert s["episode_offset"] == 0, "offset must be derived, manual -1 gone"
+        assert s["anidb_mapped"] is not None
+
+        cfg = Config(db_dsn=DSN, anime_root=str(tmp_path / "media"), movie_root=str(tmp_path / "m2"),
+                     downloads_dir="/tmp", jellyfin_url="", jellyfin_api_key="", jellyfin_path_from="",
+                     jellyfin_path_to="", nyaa_url="http://fake", qbit_url="", qbit_user="", qbit_pass="",
+                     qbit_category="k", anidb_cache=str(tmp_path / "cache"))
+        await cli.cmd_reconcile(cfg, SimpleNamespace(anilist_id=[900001], apply=True))
+
+        # special moved to Season 00 at its anime-lists slot (S1 -> S0E2)
+        show = organize.series_dir(s).parent
+        specials = list((show / "Season 00").glob("*.mkv"))
+        assert len(specials) == 1 and "S00E002" in specials[0].name, specials
+        # episodes renumbered 1..2 from their source names
+        cur = await conn.execute(
+            "SELECT absolute_number, source_name FROM episodes WHERE anilist_id=900001 ORDER BY 1")
+        rows = await cur.fetchall()
+        assert [(r["absolute_number"], r["source_name"][-17:]) for r in rows] == [
+            (1, "01 (BD 1080p).mkv"), (2, "02 (BD 1080p).mkv")], rows
+        for r in rows:
+            ep = await db.get_episode(conn, 900001, r["absolute_number"])
+            assert Path(ep["file_path"]).exists()
+        # AniDB titles flowed into the refreshed NFOs
+        ep1 = await db.get_episode(conn, 900001, 1)
+        nfo_text = Path(ep1["file_path"]).with_suffix(".nfo").read_text()
+        assert "Ep One" in nfo_text and "2023-07-10" in nfo_text
+
+    asyncio.run(main())
+
+
 def test_arr_api_for_seerr(postgres, tmp_path):
     """The Sonarr-shaped surface Seerr drives: auth, discovery endpoints,
     lookup, and a season request adding franchise entries."""

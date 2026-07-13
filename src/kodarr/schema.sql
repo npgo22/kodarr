@@ -95,3 +95,36 @@ CREATE TABLE IF NOT EXISTS anilist_cache (
     payload     jsonb NOT NULL,
     fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- === AniDB episode identity (the mapping spine) ===
+-- Per-episode ground truth from AniDB (via Shoko's Anime_HTTP cache zip, live
+-- HTTP API fallback). Regular/special typing, real titles and airdates. series
+-- rows with an anidb_id but anidb_mapped IS NULL form the background mapping
+-- queue: they work with AniList-guessed numbers until the anidb pass resolves
+-- them, then everything (episode counts, offsets, specials) is derived data.
+ALTER TABLE series ADD COLUMN IF NOT EXISTS anidb_mapped timestamptz;
+
+CREATE TABLE IF NOT EXISTS anidb_episodes (
+    anidb_id    integer NOT NULL,   -- AniDB anime id
+    epno        text    NOT NULL,   -- '1', 'S1' (special), 'T1' (trailer), 'C1' (credits)...
+    type        integer NOT NULL,   -- 1 regular, 2 special, 3 credits, 4 trailer, 5 parody, 6 other
+    number      integer NOT NULL,   -- numeric part of epno
+    title_en    text,
+    title_romaji text,
+    airdate     date,
+    length_min  integer,
+    PRIMARY KEY (anidb_id, epno)
+);
+
+-- Cross-source identity from Anime-Lists/anime-lists (the Shoko/Sonarr-anime
+-- community map): AniDB anime -> TVDB/TMDB season + episode offset + where its
+-- specials land in TVDB season 0. episode_offset here replaces every manual
+-- series.episode_offset: tvdb/release episode N = anidb episode N - offset.
+CREATE TABLE IF NOT EXISTS anidb_map (
+    anidb_id            integer PRIMARY KEY,
+    tvdb_id             text,               -- numeric, or 'movie'/'OVA'/'unknown'
+    default_tvdb_season text,
+    episode_offset      integer NOT NULL DEFAULT 0,
+    special_map         jsonb NOT NULL DEFAULT '{}'::jsonb,  -- anidb special num -> tvdb S0 episode num
+    updated_at          timestamptz NOT NULL DEFAULT now()
+);

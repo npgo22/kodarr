@@ -206,21 +206,39 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
         return  # no files yet: don't create empty season dirs jellyfin would render
     await write_season(http, s, media)
 
-    # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
-    titles: dict[int, dict] = {n: {"title": t} for n, t in media["episode_titles"].items()}
+    # episode enrichment, weakest to strongest: anilist streamingEpisodes,
+    # AniDB episode identity (official titles + airdates), TMDB (stills/overviews).
+    # int(n): payloads read back from the anilist_cache jsonb have string keys
+    titles: dict[int, dict] = {int(n): {"title": t} for n, t in media["episode_titles"].items()}
+    if idmap and idmap.get("anidb_id"):
+        cur = await conn.execute(
+            "SELECT number, title_en, airdate FROM anidb_episodes WHERE anidb_id = %s AND type = 1",
+            (idmap["anidb_id"],),
+        )
+        for e in await cur.fetchall():
+            info = titles.setdefault(e["number"], {})
+            if e["title_en"]:
+                info["title"] = e["title_en"]
+            if e["airdate"]:
+                info["aired"] = str(e["airdate"])
     if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
         # split cours share one TMDB season; our episode N is TMDB episode
-        # N + (episodes of earlier cours in the same TMDB season). This is
-        # unrelated to episode_offset, which describes release numbering.
-        # A manual tmdb_offset override wins outright — TMDB "Specials"
-        # seasons interleave recaps/web episodes, so arithmetic can't land.
+        # N + offset. Priority: manual override (TMDB "Specials" seasons can
+        # defy arithmetic) > anime-lists derived offset > summed siblings.
         cur = await conn.execute(
             "SELECT tmdb_offset FROM id_map_overrides WHERE anilist_id = %s AND tmdb_offset IS NOT NULL",
             (s["anilist_id"],),
         )
         row = await cur.fetchone()
+        am = None
+        if row is None and idmap.get("anidb_id"):
+            cur = await conn.execute(
+                "SELECT episode_offset FROM anidb_map WHERE anidb_id = %s", (idmap["anidb_id"],))
+            am = await cur.fetchone()
         if row:
             tmdb_off = row["tmdb_offset"]
+        elif am is not None:
+            tmdb_off = am["episode_offset"]
         else:
             cur = await conn.execute(
                 """SELECT COALESCE(SUM(sib.episodes), 0) AS off
