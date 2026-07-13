@@ -255,11 +255,30 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
             )
             tmdb_off = (await cur.fetchone())["off"]
         tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], tmdb_season)
-        pairs = {int(k): v for k, v in (season_map.get("pairs") or {}).items()}
-        for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
-            info = tmdb_eps.get(pairs.get(our_ep, our_ep + tmdb_off))
-            if info:
-                titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
+        # include episodes on disk beyond the counted range (web extras like
+        # Bakemonogatari 13-15 live past `episodes` but exist upstream)
+        cur = await conn.execute(
+            "SELECT absolute_number FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL", (s["anilist_id"],))
+        nums = {r["absolute_number"] for r in await cur.fetchall()}
+        nums |= set(range(1, (s.get("episodes") or s.get("aired") or 0) + 1))
+        if tmdb_season == 0 and not row:
+            # Specials seasons: anime-lists numbering is TVDB's, and TMDB's S0
+            # orders differently — numeric mapping lies. Match by air date
+            # (AniDB airdates are already in `titles`), skip ambiguous dates.
+            by_date: dict[str, list[dict]] = {}
+            for info in tmdb_eps.values():
+                if info.get("aired"):
+                    by_date.setdefault(info["aired"], []).append(info)
+            for our_ep in sorted(nums):
+                hits = by_date.get(titles.get(our_ep, {}).get("aired") or "", [])
+                if len(hits) == 1:
+                    titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in hits[0].items() if v}}
+        else:
+            pairs = {int(k): v for k, v in (season_map.get("pairs") or {}).items()}
+            for our_ep in sorted(nums):
+                info = tmdb_eps.get(pairs.get(our_ep, our_ep + tmdb_off))
+                if info:
+                    titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
     cur = await conn.execute(
         "SELECT absolute_number, file_path, title FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL",
         (s["anilist_id"],),
