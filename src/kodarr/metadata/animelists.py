@@ -40,6 +40,11 @@ def _mappings(anime: ET.Element) -> tuple[dict[str, int], dict]:
         pairs = {a: int(b) for a, b in re.findall(r";(\d+)-(\d+)", m.text or "")}
         if m.get("anidbseason") == "0" and m.get("tvdbseason") == "0":
             specials.update(pairs)
+        elif m.get("anidbseason") == "0":
+            # AniDB specials that TVDB counts in-season (Bakemonogatari's web
+            # episodes: S1-S3 -> S1 E13-15). Inverted {tvdb_ep: anidb_special}
+            # under a reserved key — numeric special_slot lookups never hit it.
+            specials["in_season"] = {str(b): int(a) for a, b in pairs.items()}
         elif m.get("anidbseason") == "1":
             off = m.get("offset")
             season_map = {

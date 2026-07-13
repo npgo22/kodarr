@@ -215,12 +215,36 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
             "SELECT number, title_en, airdate FROM anidb_episodes WHERE anidb_id = %s AND type = 1",
             (idmap["anidb_id"],),
         )
-        for e in await cur.fetchall():
+        regulars = await cur.fetchall()
+        # fill-only: AniList's CR-sourced titles ("Tsubasa Family, Part 1") beat
+        # AniDB's structural ones ("Part 1 of 4"); AniDB contributes airdates +
+        # titles AniList lacks
+        for e in regulars:
             info = titles.setdefault(e["number"], {})
-            if e["title_en"]:
+            if e["title_en"] and not info.get("title"):
                 info["title"] = e["title_en"]
             if e["airdate"]:
                 info["aired"] = str(e["airdate"])
+        # web extras counted in-season by TVDB but typed special by AniDB
+        # (Bakemonogatari E13-15 = AniDB S1-S3): anime-lists in-season pairs
+        cur = await conn.execute("SELECT special_map, default_tvdb_season FROM anidb_map WHERE anidb_id = %s",
+                                 (idmap["anidb_id"],))
+        am_row = await cur.fetchone()
+        in_season = ((am_row or {}).get("special_map") or {}).get("in_season") or {}
+        if in_season:
+            cur = await conn.execute(
+                "SELECT number, title_en, airdate FROM anidb_episodes WHERE anidb_id = %s AND type = 2",
+                (idmap["anidb_id"],))
+            sp = {e["number"]: e for e in await cur.fetchall()}
+            for tvdb_ep, sp_num in in_season.items():
+                e = sp.get(sp_num)
+                if e is None:
+                    continue
+                info = titles.setdefault(int(tvdb_ep), {})
+                if e["title_en"] and not info.get("title"):
+                    info["title"] = e["title_en"]
+                if e["airdate"]:
+                    info["aired"] = str(e["airdate"])
     if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
         # split cours share one TMDB season; our episode N is TMDB episode
         # N + offset. Priority: manual override (TMDB "Specials" seasons can
