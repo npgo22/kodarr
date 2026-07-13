@@ -128,3 +128,8 @@ CREATE TABLE IF NOT EXISTS anidb_map (
     special_map         jsonb NOT NULL DEFAULT '{}'::jsonb,  -- anidb special num -> tvdb S0 episode num
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
+-- where an entry's REGULAR episodes live when they don't follow
+-- defaulttvdbseason + episodeoffset (e.g. Nekomonogatari -> TVDB S0 E5-8)
+ALTER TABLE anidb_map ADD COLUMN IF NOT EXISTS season_map jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- Fribb id-map gaps (e.g. Zoku Owarimonogatari lacks anidb_id): manual, durable
+ALTER TABLE id_map_overrides ADD COLUMN IF NOT EXISTS anidb_id integer;

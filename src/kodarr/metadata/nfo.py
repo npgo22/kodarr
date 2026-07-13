@@ -231,12 +231,19 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
         )
         row = await cur.fetchone()
         am = None
-        if row is None and idmap.get("anidb_id"):
+        if idmap.get("anidb_id"):
             cur = await conn.execute(
-                "SELECT episode_offset FROM anidb_map WHERE anidb_id = %s", (idmap["anidb_id"],))
+                "SELECT episode_offset, season_map FROM anidb_map WHERE anidb_id = %s", (idmap["anidb_id"],))
             am = await cur.fetchone()
+        season_map = (am or {}).get("season_map") or {}
+        tmdb_season = idmap["tmdb_season"]
         if row:
             tmdb_off = row["tmdb_offset"]
+        elif season_map:
+            # entry's regular episodes live outside defaulttvdbseason (e.g.
+            # Nekomonogatari -> TVDB/TMDB S0 E5-8): explicit per-season mapping
+            tmdb_season = season_map.get("tvdbseason", tmdb_season)
+            tmdb_off = season_map.get("offset", 0)
         elif am is not None:
             tmdb_off = am["episode_offset"]
         else:
@@ -247,9 +254,10 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
                 (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
             )
             tmdb_off = (await cur.fetchone())["off"]
-        tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
+        tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], tmdb_season)
+        pairs = {int(k): v for k, v in (season_map.get("pairs") or {}).items()}
         for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
-            info = tmdb_eps.get(our_ep + tmdb_off)
+            info = tmdb_eps.get(pairs.get(our_ep, our_ep + tmdb_off))
             if info:
                 titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
     cur = await conn.execute(

@@ -119,12 +119,24 @@ async def resolve_series(conn: AsyncConnection, s: dict, anidb_id: int, anime: d
             await cur.executemany(
                 """INSERT INTO anidb_episodes (anidb_id, epno, type, number, title_en, title_romaji, airdate, length_min)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", rows)
+        cur = await conn.execute(
+            "SELECT episode_offset, season_map FROM anidb_map WHERE anidb_id = %s", (anidb_id,))
+        am = await cur.fetchone()
         # AniDB's regular-episode count beats AniList's — the sources disagree on
         # split-cour boundaries (Mushoku S2 part 1: AniList 13, AniDB 12) and
         # AniDB matches how release groups and TVDB/TMDB number things. Only for
         # ended anime: a stale cache snapshot must not truncate an airing show.
+        # Exception: entries whose anime-lists map sends "regular" episodes to
+        # E0 (recap marker) — there the broadcast episodes are typed as AniDB
+        # SPECIALS (Owarimonogatari S2: 7 eps on TV, AniDB regular count 2), so
+        # the regular count is meaningless for our numbering.
         regular = sum(1 for e in anime["episodes"] if e["type"] == 1)
-        if anime["enddate"] and regular and regular != (s.get("episodes") or 0):
+        pairs = ((am or {}).get("season_map") or {}).get("pairs") or {}
+        recapish = any(v == 0 for v in pairs.values())
+        if recapish:
+            log.warning("anidb regular eps are recaps per anime-lists — count not corrected", extra={
+                "event": "anidb_resolve", "anilist_id": s["anilist_id"], "regular": regular})
+        elif anime["enddate"] and regular and regular != (s.get("episodes") or 0):
             log.info("episode count corrected", extra={
                 "event": "anidb_resolve", "anilist_id": s["anilist_id"],
                 "old": s.get("episodes"), "new": regular})
@@ -132,8 +144,6 @@ async def resolve_series(conn: AsyncConnection, s: dict, anidb_id: int, anime: d
                 "UPDATE series SET episodes = %s, aired = %s WHERE anilist_id = %s",
                 (regular, regular, s["anilist_id"]))
         # release/tvdb episode offset from anime-lists (replaces manual entry)
-        cur = await conn.execute("SELECT episode_offset FROM anidb_map WHERE anidb_id = %s", (anidb_id,))
-        am = await cur.fetchone()
         if am is not None and am["episode_offset"] != s.get("episode_offset", 0):
             log.info("episode offset derived", extra={
                 "event": "anidb_resolve", "anilist_id": s["anilist_id"],

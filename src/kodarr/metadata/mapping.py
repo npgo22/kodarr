@@ -55,10 +55,20 @@ async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
                WHERE tmdb_tv_id IS NOT NULL
                ON CONFLICT (anilist_id) DO NOTHING"""
         )
+        # tmdb_season NULL in an override intentionally disables TMDB episode
+        # enrichment — but only when the row is ABOUT tmdb. anidb-only override
+        # rows (Fribb id-map gaps, e.g. Zoku Owarimonogatari) must not touch it.
         await conn.execute(
             """UPDATE id_map m SET tmdb_season = o.tmdb_season,
                                    tmdb_tv_id  = COALESCE(o.tmdb_tv_id, m.tmdb_tv_id)
-               FROM id_map_overrides o WHERE o.anilist_id = m.anilist_id"""
+               FROM id_map_overrides o WHERE o.anilist_id = m.anilist_id
+                 AND NOT (o.anidb_id IS NOT NULL AND o.tmdb_tv_id IS NULL
+                          AND o.tmdb_season IS NULL AND o.tmdb_offset IS NULL)"""
+        )
+        await conn.execute(
+            """UPDATE id_map m SET anidb_id = o.anidb_id
+               FROM id_map_overrides o
+               WHERE o.anilist_id = m.anilist_id AND o.anidb_id IS NOT NULL"""
         )
     log.info("id mapping refreshed", extra={"event": "mapping_refresh", "rows": len(rows)})
 

@@ -110,14 +110,19 @@ def test_animelists_parse():
         <mapping-list><mapping anidbseason="0" tvdbseason="0">;1-2;2-0;</mapping></mapping-list>
       </anime>
       <anime anidbid="18104" tvdbid="371310" defaulttvdbseason="2" episodeoffset="12"/>
+      <anime anidbid="9453" tvdbid="102261" defaulttvdbseason="0">
+        <mapping-list><mapping anidbseason="1" tvdbseason="0" offset="4" start="1" end="4"/></mapping-list>
+      </anime>
       <anime anidbid="99" tvdbid="movie"/>
       <anime tvdbid="777"/>
     </anime-list>"""
     rows = {r[0]: r for r in animelists.parse(xml)}
     assert rows[17236][3] == 0 and rows[17236][4] == {"1": 2, "2": 0}
     assert rows[18104][3] == 12 and rows[18104][4] == {}
+    # regular episodes living in TVDB S0 (Nekomonogatari pattern)
+    assert rows[9453][5] == {"tvdbseason": 0, "offset": 4, "pairs": {}, "start": 1, "end": 4}
     assert rows[99][1] == "movie"
-    assert len(rows) == 3  # entry without anidbid dropped
+    assert len(rows) == 4  # entry without anidbid dropped
 
 
 def test_anidb_parse_anime():

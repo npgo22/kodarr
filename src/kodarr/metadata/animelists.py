@@ -23,33 +23,50 @@ log = logging.getLogger(__name__)
 URL = "https://raw.githubusercontent.com/Anime-Lists/anime-lists/master/anime-list-master.xml"
 
 
-def _specials(anime: ET.Element) -> dict[str, int]:
-    """{anidb special number: tvdb S0 episode} from mapping-list ';a-b;' pairs."""
-    out: dict[str, int] = {}
+def _mappings(anime: ET.Element) -> tuple[dict[str, int], dict]:
+    """(specials, season_map) from the mapping-list.
+
+    specials: {anidb special number: tvdb S0 episode} from anidbseason=0 pairs.
+    season_map: for anidbseason=1 entries, where the REGULAR episodes live when
+    they don't follow defaulttvdbseason (+episodeoffset) — e.g. Nekomonogatari's
+    4 episodes are TVDB S0 E5-8: {'tvdbseason': 0, 'offset': 4, 'pairs': {..}}.
+    """
+    specials: dict[str, int] = {}
+    season_map: dict = {}
     ml = anime.find("mapping-list")
     if ml is None:
-        return out
+        return specials, season_map
     for m in ml.findall("mapping"):
-        if m.get("anidbseason") != "0" or m.get("tvdbseason") != "0":
-            continue
-        for a, b in re.findall(r";(\d+)-(\d+)", m.text or ""):
-            out[a] = int(b)
-    return out
+        pairs = {a: int(b) for a, b in re.findall(r";(\d+)-(\d+)", m.text or "")}
+        if m.get("anidbseason") == "0" and m.get("tvdbseason") == "0":
+            specials.update(pairs)
+        elif m.get("anidbseason") == "1":
+            off = m.get("offset")
+            season_map = {
+                "tvdbseason": int(m.get("tvdbseason") or 0),
+                "offset": int(off) if off and off.lstrip("-").isdigit() else 0,
+                "pairs": pairs,
+                "start": int(m.get("start")) if m.get("start") else None,
+                "end": int(m.get("end")) if m.get("end") else None,
+            }
+    return specials, season_map
 
 
-def parse(xml_text: str) -> list[tuple[int, str | None, str | None, int, dict[str, int]]]:
+def parse(xml_text: str) -> list[tuple[int, str | None, str | None, int, dict[str, int], dict]]:
     rows = []
     for anime in ET.fromstring(xml_text):
         aid = anime.get("anidbid")
         if not aid or not aid.isdigit():
             continue
         off = anime.get("episodeoffset")
+        specials, season_map = _mappings(anime)
         rows.append((
             int(aid),
             anime.get("tvdbid"),
             anime.get("defaulttvdbseason"),
             int(off) if off and off.lstrip("-").isdigit() else 0,
-            _specials(anime),
+            specials,
+            season_map,
         ))
     return rows
 
@@ -57,13 +74,13 @@ def parse(xml_text: str) -> list[tuple[int, str | None, str | None, int, dict[st
 async def refresh(conn: AsyncConnection, http: httpx.AsyncClient) -> None:
     r = await http.get(URL, timeout=120, follow_redirects=True)
     r.raise_for_status()
-    rows = [(a, t, s, o, json.dumps(sp)) for a, t, s, o, sp in parse(r.text)]
+    rows = [(a, t, s, o, json.dumps(sp), json.dumps(sm)) for a, t, s, o, sp, sm in parse(r.text)]
     async with conn.transaction():
         await conn.execute("DELETE FROM anidb_map")
         async with conn.cursor() as cur:
             await cur.executemany(
-                """INSERT INTO anidb_map (anidb_id, tvdb_id, default_tvdb_season, episode_offset, special_map)
-                   VALUES (%s, %s, %s, %s, %s) ON CONFLICT (anidb_id) DO NOTHING""",
+                """INSERT INTO anidb_map (anidb_id, tvdb_id, default_tvdb_season, episode_offset, special_map, season_map)
+                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (anidb_id) DO NOTHING""",
                 rows,
             )
     log.info("anime-lists map refreshed", extra={"event": "animelists_refresh", "rows": len(rows)})
