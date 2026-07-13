@@ -29,11 +29,12 @@ def _video_files(path: Path) -> list[Path]:
     )
 
 
-async def special_slot(conn: AsyncConnection, anilist_id: int, sp_num: int) -> tuple[int, str | None]:
-    """(display number, title) for special #sp_num: the anime-lists TVDB S0
-    episode slot + the AniDB special's title, falling back to the raw number."""
+async def special_slot(conn: AsyncConnection, anilist_id: int, sp_num: int) -> tuple[int, str | None, str | None]:
+    """(display number, title, airdate) for special #sp_num: the anime-lists
+    TVDB S0 episode slot + the AniDB special's metadata, falling back to the
+    raw number."""
     cur = await conn.execute(
-        """SELECT am.special_map, ae.title_en
+        """SELECT am.special_map, ae.title_en, ae.airdate
            FROM id_map m
            LEFT JOIN anidb_map am USING (anidb_id)
            LEFT JOIN anidb_episodes ae ON ae.anidb_id = m.anidb_id AND ae.type = 2 AND ae.number = %s
@@ -42,20 +43,21 @@ async def special_slot(conn: AsyncConnection, anilist_id: int, sp_num: int) -> t
     )
     r = await cur.fetchone()
     if r is None:
-        return sp_num, None
-    return int((r["special_map"] or {}).get(str(sp_num), sp_num)), r["title_en"]
+        return sp_num, None, None
+    aired = str(r["airdate"]) if r["airdate"] else None
+    return int((r["special_map"] or {}).get(str(sp_num), sp_num)), r["title_en"], aired
 
 
 async def _import_special(conn: AsyncConnection, row: dict[str, Any], sp_num: int,
                           group: str | None, src: Path, touched_dirs: set[str]) -> None:
     """File special #sp_num of this entry under the show's Season 00."""
-    disp, title = await special_slot(conn, row["anilist_id"], sp_num)
+    disp, title, aired = await special_slot(conn, row["anilist_id"], sp_num)
     sp_row = {**row, "season": 0}
     dest = organize.dest_path(sp_row, disp, group, src.suffix.lower())
     if dest.exists():
         return
     organize.import_file(src, dest)
-    nfo.write_episode(dest, sp_row, disp, title)
+    nfo.write_episode(dest, sp_row, disp, title, aired=aired)
     touched_dirs.add(str(dest.parent))
     log.info("imported special", extra={
         "event": "import", "file": src.name, "anilist_id": row["anilist_id"],

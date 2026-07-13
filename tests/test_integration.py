@@ -326,6 +326,8 @@ def test_anidb_resolve_and_reconcile(postgres, tmp_path):
         show = organize.series_dir(s).parent
         specials = list((show / "Season 00").glob("*.mkv"))
         assert len(specials) == 1 and "S00E002" in specials[0].name, specials
+        sp_nfo = specials[0].with_suffix(".nfo").read_text()
+        assert "The Special" in sp_nfo and "2023-07-03" in sp_nfo, sp_nfo
         # episodes renumbered 1..2 from their source names
         cur = await conn.execute(
             "SELECT absolute_number, source_name FROM episodes WHERE anilist_id=900001 ORDER BY 1")

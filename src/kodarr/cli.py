@@ -125,6 +125,7 @@ async def cmd_reconcile(cfg: Config, args) -> None:
         moves: list[tuple[Path, Path]] = []        # video file renames (two-phase)
         deletes: list[tuple[int, int]] = []        # episodes rows to drop (specials & moved-away)
         inserts: list[tuple] = []                  # rows to (re)create
+        sp_nfos: list[tuple[Path, dict, int, str | None, str | None]] = []  # specials: nfo after move
         touched: dict[int, dict] = {}
         for s in targets:
             cur = await conn.execute(
@@ -140,11 +141,12 @@ async def cmd_reconcile(cfg: Config, args) -> None:
                 if parsed.season == 0 or num == 0:
                     # belongs in Specials, not the episode table
                     sp_num = parsed.episode if parsed.season == 0 and parsed.episode else 1
-                    disp, _title = await importer.special_slot(conn, s["anilist_id"], sp_num)
+                    disp, sp_title, sp_aired = await importer.special_slot(conn, s["anilist_id"], sp_num)
                     dest = organize.dest_path({**s, "season": 0}, disp, e["release_group"], old.suffix)
                     print(f"  special: {old.name} -> {dest.relative_to(dest.parents[2])}")
                     moves.append((old, dest))
                     deletes.append((s["anilist_id"], e["absolute_number"]))
+                    sp_nfos.append((dest, {**s, "season": 0}, disp, sp_title, sp_aired))
                     touched[s["anilist_id"]] = s
                     continue
                 total = row.get("episodes") or (row.get("aired") or 0) + 1
@@ -183,6 +185,10 @@ async def cmd_reconcile(cfg: Config, args) -> None:
         for tmp, dest in staged:
             dest.parent.mkdir(parents=True, exist_ok=True)
             tmp.rename(dest)
+        # specials aren't in the episodes table, so refresh_series won't touch
+        # them — write their NFOs (AniDB title/airdate) here
+        for dest, sp_row, disp, sp_title, sp_aired in sp_nfos:
+            nfo.write_episode(dest, sp_row, disp, sp_title, aired=sp_aired)
         async with conn.transaction():
             for aid, num in deletes:
                 await conn.execute("DELETE FROM episodes WHERE anilist_id=%s AND absolute_number=%s", (aid, num))
