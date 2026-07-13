@@ -159,7 +159,7 @@ def test_announce_to_library(postgres, tmp_path):
 
         d = object.__new__(daemon_mod.Daemon)  # skip __init__: wire fakes directly
         d.cfg, d.conn, d.qbit, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.jellyfin
-        d.http = svc.http
+        d.http, d.tmdb = svc.http, None
         await d.watch_pass()
 
         ep = await db.get_episode(conn, 154587, 3)
@@ -270,7 +270,7 @@ def test_arr_api_for_seerr(postgres, tmp_path):
 
         d = object.__new__(daemon_mod.Daemon)
         d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
-        d.conn, d.http = conn, svc.http
+        d.conn, d.http, d.tmdb = conn, svc.http, None
         d.qbit, d.jellyfin = svc.qbit, svc.jellyfin
         d._bg = set()
 

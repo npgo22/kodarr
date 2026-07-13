@@ -73,6 +73,8 @@ async def cmd_remove(cfg: Config, args) -> None:
 
 
 async def cmd_import(cfg: Config, args) -> None:
+    from kodarr.metadata.tmdb import Tmdb
+
     conn = await db.connect(cfg.db_dsn)
     async with httpx.AsyncClient() as http:
         jf = (
@@ -80,7 +82,8 @@ async def cmd_import(cfg: Config, args) -> None:
             if cfg.jellyfin_url
             else None
         )
-        n = await importer.import_path(conn, jf, Path(args.path), http=http, from_seadex=args.seadex)
+        n = await importer.import_path(conn, jf, Path(args.path), http=http,
+                                       tmdb=Tmdb(http, cfg.tmdb_api_key), from_seadex=args.seadex)
     print(f"imported {n} file(s)")
 
 

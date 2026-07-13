@@ -138,7 +138,7 @@ async def write_season(http: httpx.AsyncClient, series: dict[str, Any], media: d
 
 def write_episode(
     video_path: Path, series: dict[str, Any], episode: int, title: str | None,
-    overview: str | None = None, source: str | None = None,
+    overview: str | None = None,
     aired: str | None = None, rating: float | None = None, still_url: str | None = None,
 ) -> None:
     ep = ET.Element("episodedetails")
@@ -150,12 +150,8 @@ def write_episode(
     # records which TMDB still the local -thumb.jpg came from, so a mapping
     # correction invalidates the stale image instead of leaving it forever
     _el(ep, "thumb", still_url)
-    # AniDB-style provenance: the release this file came from, visible in the
-    # episode info panel (tells BD vs WEB at a glance)
-    plot = (overview or "").strip()
-    if source:
-        plot = f"{plot}\n\nSource: {source}" if plot else f"Source: {source}"
-    _el(ep, "plot", plot or None)
+    # no release-name suffix in the plot: jellyfin already shows the filename
+    _el(ep, "plot", (overview or "").strip() or None)
     _write_xml(ep, video_path.with_suffix(".nfo"))
 
 
@@ -172,101 +168,111 @@ async def write_movie(
     await _download(http, media.get("banner_url"), d / "fanart.jpg")
 
 
-async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
-    """Write/update NFOs + artwork for the whole library. AniList for
+async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str, Any],
+                         roots_done: set[int] | None = None) -> None:
+    """Write/update NFOs + artwork for one series entry. AniList for
     structure/plot/ratings; TMDB (when keyed) enriches episode titles,
-    overviews, stills and show backdrops."""
+    overviews, stills and show backdrops. Called per-series after imports
+    and from the recent/daily passes; refresh_all shares roots_done so a
+    franchise's show NFO is only rewritten once per sweep."""
+    if roots_done is None:
+        roots_done = set()
+    media = await anilist.by_id(http, s["anilist_id"], conn)
+    idmap = await db.get_id_map(conn, s["anilist_id"])
+    if s["format"] == "MOVIE":
+        await write_movie(http, s, media, idmap)
+        if tmdb_client and idmap and idmap.get("tmdb_movie_id"):
+            url = await tmdb_client.backdrop(movie_id=idmap["tmdb_movie_id"])
+            if url:
+                await _download(http, url, organize.series_dir(s) / "fanart.jpg")
+        return
+    key = s.get("show_key") or s["anilist_id"]
+    show_dir = organize.series_dir(s).parent
+    if key not in roots_done:
+        root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
+        if s.get("show_title"):  # manual show-title overrides beat the root entry's title
+            root_media = {**root_media, "title": s["show_title"]}
+        await write_show(http, show_dir, root_media, idmap)
+        if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
+            url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])
+            if url:
+                (show_dir / "fanart.jpg").unlink(missing_ok=True)
+                await _download(http, url, show_dir / "fanart.jpg")
+        roots_done.add(key)
+    cur = await conn.execute(
+        "SELECT count(*) AS n FROM episodes WHERE anilist_id = %s AND file_path IS NOT NULL", (s["anilist_id"],)
+    )
+    if (await cur.fetchone())["n"] == 0:
+        return  # no files yet: don't create empty season dirs jellyfin would render
+    await write_season(http, s, media)
+
+    # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
+    titles: dict[int, dict] = {n: {"title": t} for n, t in media["episode_titles"].items()}
+    if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
+        # split cours share one TMDB season; our episode N is TMDB episode
+        # N + (episodes of earlier cours in the same TMDB season). This is
+        # unrelated to episode_offset, which describes release numbering.
+        # A manual tmdb_offset override wins outright — TMDB "Specials"
+        # seasons interleave recaps/web episodes, so arithmetic can't land.
+        cur = await conn.execute(
+            "SELECT tmdb_offset FROM id_map_overrides WHERE anilist_id = %s AND tmdb_offset IS NOT NULL",
+            (s["anilist_id"],),
+        )
+        row = await cur.fetchone()
+        if row:
+            tmdb_off = row["tmdb_offset"]
+        else:
+            cur = await conn.execute(
+                """SELECT COALESCE(SUM(sib.episodes), 0) AS off
+                   FROM series sib JOIN id_map im ON im.anilist_id = sib.anilist_id
+                   WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
+                (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
+            )
+            tmdb_off = (await cur.fetchone())["off"]
+        tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
+        for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
+            info = tmdb_eps.get(our_ep + tmdb_off)
+            if info:
+                titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
+    cur = await conn.execute(
+        "SELECT absolute_number, file_path, title FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL",
+        (s["anilist_id"],),
+    )
+    for e in await cur.fetchall():
+        info = titles.get(e["absolute_number"], {})
+        title = info.get("title") or e["title"]
+        if title and title != e["title"]:
+            await conn.execute(
+                "UPDATE episodes SET title=%s WHERE anilist_id=%s AND absolute_number=%s",
+                (title, s["anilist_id"], e["absolute_number"]),
+            )
+        p = Path(e["file_path"])
+        if p.exists():
+            # stale-thumb detection: the previous NFO records the still URL
+            # its -thumb.jpg came from; if the mapping moved, refetch
+            still = info.get("still_url")
+            thumb = p.with_name(p.stem + "-thumb.jpg")
+            old_nfo = p.with_suffix(".nfo")
+            if still and thumb.exists() and old_nfo.exists():
+                try:
+                    prev = ET.parse(old_nfo).getroot().findtext("thumb")
+                except ET.ParseError:
+                    prev = None
+                if prev != still:
+                    thumb.unlink(missing_ok=True)
+            write_episode(p, s, e["absolute_number"], title, info.get("overview"),
+                          info.get("aired"), info.get("rating"), still)
+            if still:
+                await _download(http, still, thumb)
+    log.info("nfo written", extra={"event": "nfo", "anilist_id": s["anilist_id"], "series": s["title"]})
+
+
+async def refresh_all(conn, http: httpx.AsyncClient, tmdb_client=None) -> None:
+    """Write/update NFOs + artwork for the whole library."""
     rows = await db.monitored_series(conn)
     # one batched fetch covers every entry + franchise root
     ids = list({i for s in rows for i in (s["anilist_id"], s.get("show_key") or s["anilist_id"])})
     await anilist.by_ids(http, ids, conn)
     roots_done: set[int] = set()
     for s in rows:
-        media = await anilist.by_id(http, s["anilist_id"], conn)
-        idmap = await db.get_id_map(conn, s["anilist_id"])
-        if s["format"] == "MOVIE":
-            await write_movie(http, s, media, idmap)
-            if tmdb_client and idmap and idmap.get("tmdb_movie_id"):
-                url = await tmdb_client.backdrop(movie_id=idmap["tmdb_movie_id"])
-                if url:
-                    await _download(http, url, organize.series_dir(s) / "fanart.jpg")
-            continue
-        key = s.get("show_key") or s["anilist_id"]
-        show_dir = organize.series_dir(s).parent
-        if key not in roots_done:
-            root_media = media if key == s["anilist_id"] else await anilist.by_id(http, key, conn)
-            if s.get("show_title"):  # manual show-title overrides beat the root entry's title
-                root_media = {**root_media, "title": s["show_title"]}
-            await write_show(http, show_dir, root_media, idmap)
-            if tmdb_client and idmap and idmap.get("tmdb_tv_id"):
-                url = await tmdb_client.backdrop(tv_id=idmap["tmdb_tv_id"])
-                if url:
-                    (show_dir / "fanart.jpg").unlink(missing_ok=True)
-                    await _download(http, url, show_dir / "fanart.jpg")
-            roots_done.add(key)
-        cur = await conn.execute(
-            "SELECT count(*) AS n FROM episodes WHERE anilist_id = %s AND file_path IS NOT NULL", (s["anilist_id"],)
-        )
-        if (await cur.fetchone())["n"] == 0:
-            continue  # no files yet: don't create empty season dirs jellyfin would render
-        await write_season(http, s, media)
-
-        # episode enrichment: anilist streamingEpisodes, then TMDB titles/overviews/stills
-        titles: dict[int, dict] = {n: {"title": t} for n, t in media["episode_titles"].items()}
-        if tmdb_client and idmap and idmap.get("tmdb_tv_id") and idmap.get("tmdb_season") is not None:
-            # split cours share one TMDB season; our episode N is TMDB episode
-            # N + (episodes of earlier cours in the same TMDB season). This is
-            # unrelated to episode_offset, which describes release numbering.
-            # A manual tmdb_offset override wins outright — TMDB "Specials"
-            # seasons interleave recaps/web episodes, so arithmetic can't land.
-            cur = await conn.execute(
-                "SELECT tmdb_offset FROM id_map_overrides WHERE anilist_id = %s AND tmdb_offset IS NOT NULL",
-                (s["anilist_id"],),
-            )
-            row = await cur.fetchone()
-            if row:
-                tmdb_off = row["tmdb_offset"]
-            else:
-                cur = await conn.execute(
-                    """SELECT COALESCE(SUM(sib.episodes), 0) AS off
-                       FROM series sib JOIN id_map im ON im.anilist_id = sib.anilist_id
-                       WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
-                    (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
-                )
-                tmdb_off = (await cur.fetchone())["off"]
-            tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], idmap["tmdb_season"])
-            for our_ep in range(1, (s.get("episodes") or s.get("aired") or 0) + 1):
-                info = tmdb_eps.get(our_ep + tmdb_off)
-                if info:
-                    titles[our_ep] = {**titles.get(our_ep, {}), **{k: v for k, v in info.items() if v}}
-        cur = await conn.execute(
-            "SELECT absolute_number, file_path, title, source_name FROM episodes WHERE anilist_id=%s AND file_path IS NOT NULL",
-            (s["anilist_id"],),
-        )
-        for e in await cur.fetchall():
-            info = titles.get(e["absolute_number"], {})
-            title = info.get("title") or e["title"]
-            if title and title != e["title"]:
-                await conn.execute(
-                    "UPDATE episodes SET title=%s WHERE anilist_id=%s AND absolute_number=%s",
-                    (title, s["anilist_id"], e["absolute_number"]),
-                )
-            p = Path(e["file_path"])
-            if p.exists():
-                # stale-thumb detection: the previous NFO records the still URL
-                # its -thumb.jpg came from; if the mapping moved, refetch
-                still = info.get("still_url")
-                thumb = p.with_name(p.stem + "-thumb.jpg")
-                old_nfo = p.with_suffix(".nfo")
-                if still and thumb.exists() and old_nfo.exists():
-                    try:
-                        prev = ET.parse(old_nfo).getroot().findtext("thumb")
-                    except ET.ParseError:
-                        prev = None
-                    if prev != still:
-                        thumb.unlink(missing_ok=True)
-                write_episode(p, s, e["absolute_number"], title, info.get("overview"), e["source_name"],
-                              info.get("aired"), info.get("rating"), still)
-                if still:
-                    await _download(http, still, thumb)
-        log.info("nfo written", extra={"event": "nfo", "anilist_id": s["anilist_id"], "series": s["title"]})
+        await refresh_series(conn, http, tmdb_client, s, roots_done)

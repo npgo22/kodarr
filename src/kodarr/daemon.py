@@ -86,7 +86,7 @@ class Daemon:
         try:
             series = await db.get_series(self.conn, g["anilist_id"])
             n = await importer.import_path(
-                self.conn, self.jellyfin, path, http=self.http,
+                self.conn, self.jellyfin, path, http=self.http, tmdb=self.tmdb,
                 series=series, from_seadex=g["source"] == "seadex"
             )
         except Exception:
@@ -153,6 +153,18 @@ class Daemon:
         # picks up newly-published episode titles/art for airing shows
         await nfo.refresh_all(self.conn, self.http, self.tmdb)
 
+    async def recent_nfo_pass(self) -> None:
+        # upstream (TMDB/AniList) often publishes a fresh episode's title/still
+        # hours after it airs — re-enrich recently-imported series every couple
+        # of hours so new episodes don't sit as stubs until the daily pass
+        cur = await self.conn.execute(
+            "SELECT DISTINCT anilist_id FROM episodes WHERE imported_at > now() - interval '48 hours'"
+        )
+        for r in await cur.fetchall():
+            s = await db.get_series(self.conn, r["anilist_id"])
+            if s:
+                await nfo.refresh_series(self.conn, self.http, self.tmdb, s)
+
     async def run(self) -> None:
         from kodarr import api
 
@@ -169,3 +181,4 @@ class Daemon:
             tg.create_task(self._every(DAY, self.seadex_pass, "seadex", first_delay=1200))
             tg.create_task(self._every(DAY, self.mapping_pass, "mapping", first_delay=60))
             tg.create_task(self._every(DAY, self.nfo_pass, "nfo", first_delay=1800))
+            tg.create_task(self._every(2 * 3600, self.recent_nfo_pass, "recent-nfo", first_delay=300))

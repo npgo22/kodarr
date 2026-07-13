@@ -10,7 +10,6 @@ from psycopg import AsyncConnection
 
 import httpx
 
-from kodarr.metadata import anilist
 from kodarr import db
 from kodarr.library import match
 from kodarr.metadata import nfo
@@ -35,7 +34,8 @@ async def import_path(
     jellyfin: Jellyfin | None,
     path: Path,
     *,
-    http: httpx.AsyncClient | None = None,  # for inline season-NFO writes
+    http: httpx.AsyncClient | None = None,  # for inline NFO enrichment
+    tmdb=None,  # Tmdb client; enriches titles/stills at import time
     series: dict[str, Any] | None = None,  # known from the grab; else matched by title
     from_seadex: bool = False,
 ) -> int:
@@ -72,7 +72,7 @@ async def import_path(
                 sp = organize.dest_path(sp_row, sp_ep, parsed.group, src.suffix.lower())
                 if not sp.exists():
                     organize.import_file(src, sp)
-                    nfo.write_episode(sp, sp_row, sp_ep, None, source=src.name)
+                    nfo.write_episode(sp, sp_row, sp_ep, None)
                     touched_dirs.add(str(sp.parent))
                     log.info("imported special", extra={
                         "event": "import", "file": src.name,
@@ -116,8 +116,8 @@ async def import_path(
         organize.import_file(src, dest, replace=replace)
         await db.upsert_episode(conn, row["anilist_id"], abs_num, str(dest), parsed.group, from_seadex, src.name)
         if row["format"] != "MOVIE":
-            # placeholder title now; the daily NFO pass fills real titles
-            nfo.write_episode(dest, row, abs_num, (existing or {}).get("title"), source=src.name)
+            # placeholder title now; refresh_series below fills real titles
+            nfo.write_episode(dest, row, abs_num, (existing or {}).get("title"))
         touched_dirs.add(str(dest.parent))
         imported_entries[row["anilist_id"]] = row
         imported += 1
@@ -133,30 +133,17 @@ async def import_path(
             },
         )
 
-    # write season/show metadata on an entry's first import so the media
-    # server never renders a bare folder name while the daily pass catches up
+    # full metadata refresh for each touched entry, inline: show/season NFOs
+    # plus episode titles/stills from AniList+TMDB. Jellyfin's realtime monitor
+    # then picks up complete metadata in one scan instead of a stub that waits
+    # up to a day for the nfo pass.
     for row in imported_entries.values():
         if http is None:
             break
-        season_nfo = organize.series_dir(row) / ("season.nfo" if row["format"] != "MOVIE" else "movie.nfo")
-        if season_nfo.exists():
-            continue
         try:
-            media = await anilist.by_id(http, row["anilist_id"], conn)
-            if row["format"] == "MOVIE":
-                await nfo.write_movie(http, row, media, await db.get_id_map(conn, row["anilist_id"]))
-            else:
-                show_nfo = organize.series_dir(row).parent / "tvshow.nfo"
-                if not show_nfo.exists():
-                    key = row.get("show_key") or row["anilist_id"]
-                    root_media = media if key == row["anilist_id"] else await anilist.by_id(http, key, conn)
-                    if row.get("show_title"):
-                        root_media = {**root_media, "title": row["show_title"]}
-                    await nfo.write_show(http, organize.series_dir(row).parent, root_media,
-                                         await db.get_id_map(conn, row["anilist_id"]))
-                await nfo.write_season(http, row, media)
+            await nfo.refresh_series(conn, http, tmdb, row)
         except Exception:
-            log.exception("inline season nfo failed", extra={"event": "error", "anilist_id": row["anilist_id"]})
+            log.exception("inline nfo refresh failed", extra={"event": "error", "anilist_id": row["anilist_id"]})
 
     if jellyfin:
         for d in touched_dirs:
