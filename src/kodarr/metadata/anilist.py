@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from kodarr.library.match import SIDE_FORMATS
+
 API = "https://graphql.anilist.co"
 
 _MEDIA_FIELDS = """
@@ -126,6 +128,13 @@ def _prequel(media: dict[str, Any]) -> dict | None:
     for rel in media["relations"]:
         if rel["type"] == "PREQUEL":
             return rel
+    # A bundled OVA/special has no PREQUEL — it hangs off the cour it shipped
+    # with by PARENT. Without this hop it becomes its own franchise root and
+    # Jellyfin grows a second show next to the real one.
+    if media["format"] in SIDE_FORMATS:
+        for rel in media["relations"]:
+            if rel["type"] == "PARENT":
+                return rel
     return None
 
 

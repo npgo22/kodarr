@@ -10,6 +10,14 @@ import anitopy
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi"}
 
+# Bundled OVAs/specials. Two things separate them from a normal cour: they hang
+# off their TV entry by PARENT rather than PREQUEL (see anilist.franchise), and
+# their identity lives entirely in the title *suffix* — "Mushoku Tensei: ... -
+# Eris no Goblin Toubatsu" is NOT "Mushoku Tensei". Truncating them at the colon
+# makes them collide with the parent show, so the pre-colon shortcut below is
+# withheld from these formats.
+SIDE_FORMATS = {"SPECIAL", "OVA"}
+
 # "2nd Season", "Season 3", "3rd season" — how AniList encodes cours in a title.
 _SEASON_RE = re.compile(r"\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b|\bseason\s+(\d+)\b")
 
@@ -120,18 +128,35 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
         wants.add(want.removesuffix(f" {parsed.season}").strip())
     for row in series_rows:
         names = {normalize(n) for n in [row["title"], *row["synonyms"]]}
-        # release groups truncate titles at the colon; accept pre-colon forms
-        short = {normalize(n.split(":")[0]) for n in [row["title"], *row["synonyms"]] if ":" in n}
+        # release groups truncate titles at the colon; accept pre-colon forms.
+        # Never for a special/OVA: "Cour 2 - Eris no Goblin Toubatsu" truncates
+        # to the bare franchise name, so the parent's own episode 1 would match
+        # the special (both "Mushoku Tensei", both episode 1) and get imported
+        # over it.
+        short = (
+            set()
+            if row.get("format") in SIDE_FORMATS
+            else {normalize(n.split(":")[0]) for n in [row["title"], *row["synonyms"]] if ":" in n}
+        )
         base_names = names | short | {_strip_season(n) for n in names | short}
         if not (wants & base_names):
             continue
-        entry_season = _entry_season(names)
-        if parsed.season is not None and parsed.season != entry_season:
-            continue  # release names a different cour than this entry
-        if parsed.season is None and entry_season > 1 and row["episode_offset"] == 0:
-            # unseasoned release + later-season entry with no absolute-numbering
-            # offset: this is a season-1-era file, not ours
-            continue
+        if row.get("format") not in SIDE_FORMATS:
+            # Cour routing. Skipped for specials: they are not a cour, and
+            # _entry_season misreads them anyway — a native-language synonym
+            # normalizes down to a bare "2" ("...第2クール..."), which would
+            # both fake a cour number and reject the special's own (unseasoned)
+            # release as "season-1-era". The full-title gate above is what
+            # identifies a special.
+            entry_season = _entry_season(names)
+            if parsed.season is not None and parsed.season != entry_season:
+                continue  # release names a different cour than this entry
+            if parsed.season is None and entry_season > 1 and row["episode_offset"] == 0:
+                # unseasoned release + later-season entry with no absolute-numbering
+                # offset: this is a season-1-era file, not ours
+                continue
+        elif parsed.season is not None:
+            continue  # a cour-tagged release is the parent show, never the special
         ep = None
         if parsed.episode is not None:
             # while airing, episodes is NULL on AniList — cap at aired+1

@@ -515,3 +515,95 @@ def test_movie_search_query_has_no_episode_number():
     # series still get the zero-padded episode
     assert search_query("Sousou no Frieren", 5, "TV", 0) == "Sousou no Frieren 05"
     assert search_query("Sousou no Frieren", 2, "TV", 28) == "Sousou no Frieren 30"
+
+
+# --- bundled OVAs/specials: must not collide with their parent show ----------
+
+ERIS = {  # real AniList 141534: the OVA bundled with Mushoku Tensei cour 2
+    "anilist_id": 141534,
+    "title": "Mushoku Tensei: Jobless Reincarnation Cour 2 - Eris the Goblin Slayer",
+    "year": 2022,
+    "format": "SPECIAL",
+    "episodes": 1,
+    "aired": 1,
+    "synonyms": [
+        "Mushoku Tensei: Isekai Ittara Honki Dasu Part 2 - Eris no Goblin Toubatsu",
+        "Mushoku Tensei: Jobless Reincarnation Cour 2 - Eris the Goblin Slayer",
+        # Load-bearing: normalize() strips the kana/kanji and leaves the bare
+        # "2", which _entry_season reads as season 2 — that is what let a
+        # "Mushoku Tensei S2" release clear the cour gate for this entry.
+        "無職転生 ～異世界行ったら本気だす～ 第2クール エリスのゴブリン討伐",
+        "Mushoku Tensei: Jobless Reincarnation Cour 2 Special",
+    ],
+    "episode_offset": 0,
+    "root_path": "/data/media/anime",
+    "preferred_group": "SubsPlease",
+}
+
+
+def test_special_does_not_match_parent_episode():
+    """Regression: the special's title truncated at the colon is just
+    "Mushoku Tensei", and it has exactly one episode — so the parent show's
+    S2E01 matched it and got grabbed as the OVA. The pre-colon shortcut must
+    not apply to SPECIAL/OVA entries."""
+    p = match.parse("[SubsPlease] Mushoku Tensei S2 - 01 (1080p) [EC64C8B1].mkv")
+    assert p and p.episode == 1 and p.season == 2
+    assert match.match(p, [ERIS]) is None
+
+
+def test_special_still_matches_its_own_release():
+    p = match.parse(
+        "[SubsPlease] Mushoku Tensei Isekai Ittara Honki Dasu Part 2 - Eris no Goblin Toubatsu (1080p) [A1B2C3D4].mkv"
+    )
+    assert p
+    m = match.match(p, [ERIS])
+    assert m and m[0]["anilist_id"] == 141534
+
+
+def test_special_search_uses_distinguishing_suffix():
+    """The bare franchise name only finds the parent show; the suffix is the
+    only part that identifies the special."""
+    from kodarr.acquire.backfill import search_query, search_titles
+
+    titles = search_titles(ERIS)
+    assert "mushoku tensei" not in titles, titles
+    assert any("eris no goblin toubatsu" in t for t in titles), titles
+    # one-episode specials are named like movies — no episode number appended
+    assert search_query(titles[0], 1, "SPECIAL", 0) == titles[0]
+
+
+def test_special_franchise_root_follows_parent_edge():
+    """A bundled OVA has no PREQUEL — only PARENT. Without that hop it becomes
+    its own franchise root and Jellyfin shows a duplicate series."""
+    import asyncio
+    import json
+
+    import httpx
+
+    from kodarr.metadata import anilist
+
+    def rel(type_, id_, fmt):
+        return {"relationType": type_, "node": {"id": id_, "format": fmt, "title": {"romaji": f"n{id_}", "english": None}, "startDate": {"year": 2021}}}
+
+    fmts = {108465: "TV", 127720: "TV", 141534: "SPECIAL"}
+    graph = {
+        108465: [],
+        127720: [rel("PREQUEL", 108465, "TV")],
+        141534: [rel("PARENT", 127720, "TV")],  # no PREQUEL edge at all
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        aid = json.loads(request.read())["variables"]["id"]
+        media = {"id": aid, "format": fmts[aid], "status": "FINISHED", "episodes": 12,
+                 "startDate": {"year": 2021}, "title": {"romaji": f"n{aid}", "english": None, "native": None},
+                 "synonyms": [], "nextAiringEpisode": None,
+                 "relations": {"edges": graph[aid]}}
+        return httpx.Response(200, json={"data": {"Media": media}})
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        special = await anilist.by_id(http, 141534)
+        fr = await anilist.franchise(http, special)
+        assert fr["show_key"] == 108465 and fr["season"] == 0, fr
+
+    asyncio.run(main())
