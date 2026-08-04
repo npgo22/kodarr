@@ -18,6 +18,32 @@ VIDEO_EXTS = {".mkv", ".mp4", ".avi"}
 # withheld from these formats.
 SIDE_FORMATS = {"SPECIAL", "OVA"}
 
+# Franchise/format filler — never distinguishing on its own.
+_FILLER = {
+    "the", "a", "an", "of", "and", "no", "wo", "wa", "ga", "ni", "de", "o",
+    "part", "cour", "season", "special", "specials", "ova", "oad", "movie", "tv",
+}
+
+
+def special_anchors(row: dict[str, Any]) -> set[str]:
+    """Words that identify a special in *both* of its canonical names.
+
+    Release groups mix languages — nyaa carries "Mushoku Tensei - Isekai Ittara
+    Honki Dasu Part 2 - Eris the Goblin Slayer": romaji franchise, English
+    special name. That string equals no single AniList synonym, so exact-name
+    matching can never find it. Intersecting the English title with the romaji
+    synonym and dropping the franchise name and filler leaves {eris, goblin} —
+    present in every naming of this OVA and in no release of the parent show.
+
+    Only the two canonical names are intersected: AniList also lists degenerate
+    synonyms ("...Cour 2 Special", or a native title that normalizes to bare
+    "2") which share no distinguishing word and would empty the set.
+    """
+    romaji = (row.get("synonyms") or [row["title"]])[0]
+    anchors = set(normalize(row["title"]).split()) & set(normalize(romaji).split())
+    anchors -= set(normalize(row.get("show_title") or "").split())
+    return {t for t in anchors if t not in _FILLER and not t.isdigit()}
+
 # "2nd Season", "Season 3", "3rd season" — how AniList encodes cours in a title.
 _SEASON_RE = re.compile(r"\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b|\bseason\s+(\d+)\b")
 
@@ -68,6 +94,7 @@ class ParsedRelease:
     episode: int | None  # None for movies / batches
     season: int | None = None  # release-named cour ("S4", "4th Season"); None if absent
     resolution: int | None = None  # vertical pixels (1080, 720, ...); None if unnamed
+    raw: str = ""  # the whole release name; specials are identified from it
 
 
 def _collapse(value) -> int | None:
@@ -109,6 +136,7 @@ def parse(release_name: str) -> ParsedRelease | None:
         episode=_collapse(parsed.get("episode_number")),
         season=_collapse(parsed.get("anime_season")),
         resolution=_resolution(parsed.get("video_resolution")),
+        raw=release_name,
     )
 
 
@@ -140,7 +168,14 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
         )
         base_names = names | short | {_strip_season(n) for n in names | short}
         if not (wants & base_names):
-            continue
+            # A special is usually named across two languages at once, matching
+            # no single synonym exactly; fall back to its anchor words, which
+            # no release of the parent show carries. Scanned over the whole
+            # release name because groups file specials as "<Show> - S00E01 -
+            # <Special Name>", leaving anitopy's anime_title as just the show.
+            anchors = special_anchors(row) if row.get("format") in SIDE_FORMATS else set()
+            if not (anchors and anchors <= set(normalize(parsed.raw or parsed.title).split())):
+                continue
         if row.get("format") not in SIDE_FORMATS:
             # Cour routing. Skipped for specials: they are not a cour, and
             # _entry_season misreads them anyway — a native-language synonym
@@ -155,8 +190,10 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
                 # unseasoned release + later-season entry with no absolute-numbering
                 # offset: this is a season-1-era file, not ours
                 continue
-        elif parsed.season is not None:
-            continue  # a cour-tagged release is the parent show, never the special
+        elif parsed.season:
+            # a cour-tagged release is the parent show, never the special —
+            # except S00, which *is* the specials season
+            continue
         ep = None
         if parsed.episode is not None:
             # while airing, episodes is NULL on AniList — cap at aired+1

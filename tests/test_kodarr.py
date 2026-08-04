@@ -538,6 +538,7 @@ ERIS = {  # real AniList 141534: the OVA bundled with Mushoku Tensei cour 2
     "episode_offset": 0,
     "root_path": "/data/media/anime",
     "preferred_group": "SubsPlease",
+    "show_title": "Mushoku Tensei: Jobless Reincarnation",
 }
 
 
@@ -607,3 +608,52 @@ def test_special_franchise_root_follows_parent_edge():
         assert fr["show_key"] == 108465 and fr["season"] == 0, fr
 
     asyncio.run(main())
+
+
+def test_special_anchor_words():
+    # shared by the English and romaji names, absent from the franchise name
+    assert match.special_anchors(ERIS) == {"eris", "goblin"}
+
+
+def test_special_matches_real_mixed_language_release():
+    """Real nyaa naming: romaji franchise + English special name. It equals no
+    single AniList synonym, so only the anchor words can identify it."""
+    for name in [
+        "[Erai-raws] Mushoku Tensei - Isekai Ittara Honki Dasu Part 2 - Eris the Goblin Slayer [1080p].mkv",
+        "[Lia] Mushoku Tensei - S00E01 - Eris The Goblin Slayer [WEB-DL 1080p AAC].mkv",
+    ]:
+        p = match.parse(name)
+        assert p, name
+        m = match.match(p, [ERIS])
+        assert m and m[0]["anilist_id"] == 141534, name
+
+
+def test_special_anchors_still_reject_parent_releases():
+    for name in [
+        "[SubsPlease] Mushoku Tensei S2 - 01 (1080p) [EC64C8B1].mkv",
+        "[SubsPlease] Mushoku Tensei - 12 (1080p) [ABCD1234].mkv",
+    ]:
+        p = match.parse(name)
+        assert p and match.match(p, [ERIS]) is None, name
+
+
+def test_special_search_leads_with_franchise_plus_anchors():
+    """Nyaa is a substring search: the full AniList title finds nothing, but
+    "mushoku tensei eris goblin" finds the real releases."""
+    from kodarr.acquire.backfill import search_titles
+
+    assert search_titles(ERIS)[0] == "mushoku tensei eris goblin"
+
+
+def test_special_rank_accepts_non_preferred_group():
+    """SubsPlease never releases a disc-only special; hard-filtering the group
+    means it could never be found. Preference, not a gate — and the preferred
+    group still sorts first."""
+    from kodarr.acquire.backfill import rank
+
+    erai = {"title": "[Erai-raws] Mushoku Tensei - Isekai Ittara Honki Dasu Part 2 - Eris the Goblin Slayer [1080p].mkv", "seeders": 5}
+    ranked = rank([erai], ERIS, 1)
+    assert [r[1] for r in ranked] == [erai]
+    # a parent-show release is still rejected no matter how well seeded
+    parent = {"title": "[SubsPlease] Mushoku Tensei S2 - 01 (1080p) [EC64C8B1].mkv", "seeders": 999}
+    assert rank([parent], ERIS, 1) == []

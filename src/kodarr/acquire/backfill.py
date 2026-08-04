@@ -26,6 +26,13 @@ def search_query(title: str, ep: int | None, fmt: str, episode_offset: int) -> s
     return f"{title} {ep + episode_offset:02d}"
 
 
+def normalize_base(series: dict[str, Any]) -> str:
+    """The franchise name a group would actually type: the show root's title,
+    pre-colon ("Mushoku Tensei"), falling back to this entry's own title."""
+    root = series.get("show_title") or series["title"]
+    return match._strip_season(match.normalize(root.split(":")[0]))
+
+
 def search_titles(series: dict[str, Any]) -> list[str]:
     """Nyaa query titles for one entry, best first.
 
@@ -39,9 +46,16 @@ def search_titles(series: dict[str, Any]) -> list[str]:
         # A special's whole identity is the suffix. The pre-colon form
         # ("Mushoku Tensei") returns only the parent show, whose episode 1 is
         # indistinguishable from the special's single episode — that is how the
-        # parent's S2E01 once got grabbed as the Eris OVA. Query the
-        # distinguishing tail instead: "... - Eris no Goblin Toubatsu".
-        candidates = [t.split(":", 1)[-1] for t in (romaji, series["title"])] + [romaji, series["title"]]
+        # parent's S2E01 once got grabbed as the Eris OVA.
+        #
+        # Full AniList titles find nothing either: nyaa is a substring search
+        # and no group writes "Cour 2 - Eris no Goblin Toubatsu". What does hit
+        # is the franchise name plus the special's anchor words, so try that
+        # first ("mushoku tensei eris goblin" -> the Erai-raws/Lia releases).
+        anchors = " ".join(sorted(match.special_anchors(series)))
+        base = normalize_base(series)
+        candidates = [f"{base} {anchors}".strip() if anchors else base]
+        candidates += [t.split(":", 1)[-1] for t in (romaji, series["title"])] + [romaji, series["title"]]
     else:
         # pre-colon short forms first: groups truncate ("Mushoku Tensei S3")
         candidates = [romaji.split(":")[0], series["title"].split(":")[0], romaji, series["title"]]
@@ -59,13 +73,21 @@ def _single_file(series: dict[str, Any]) -> bool:
 
 def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> list[tuple[tuple, dict]]:
     """Preferred-group releases for this exact series+episode; 1080p floor;
-    best resolution first, seeders break ties."""
+    best resolution first, seeders break ties.
+
+    Specials relax the group filter to a preference. They ship on the disc, so
+    a simulcast group like SubsPlease never releases one — hard-filtering on it
+    means a special can never be found at all. The strict anchor-word match in
+    match() is what keeps this from grabbing the wrong thing.
+    """
+    side = series["format"] in match.SIDE_FORMATS
     scored = []
     for res in results:
         parsed = match.parse(res["title"])
         if parsed is None:
             continue
-        if not parsed.group or parsed.group.lower() != series["preferred_group"].lower():
+        preferred = bool(parsed.group) and parsed.group.lower() == series["preferred_group"].lower()
+        if not preferred and not side:
             continue
         m = match.match(parsed, [series])
         if m is None:
@@ -79,7 +101,8 @@ def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> li
             continue
         if (parsed.resolution or 0) < 1080:
             continue  # 1080p is the floor, never grab less
-        scored.append(((parsed.resolution, res.get("seeders", 0)), res))
+        # preferred group wins over a higher-seeded stranger, resolution first
+        scored.append(((preferred, parsed.resolution, res.get("seeders", 0)), res))
     scored.sort(key=lambda s: s[0], reverse=True)
     return scored
 
