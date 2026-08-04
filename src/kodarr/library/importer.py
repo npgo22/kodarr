@@ -127,10 +127,13 @@ async def import_path(
                 continue
             row, episode = m
 
-        if row["format"] != "MOVIE" and episode is None:
+        # A one-episode OVA/special is named like a movie — the disc release
+        # carries no episode number — so an unnumbered file is its episode 1,
+        # not a match failure.
+        if not match.single_file(row) and episode is None:
             log.warning("no episode number", extra={"event": "match_fail", "file": src.name})
             continue
-        abs_num = 1 if row["format"] == "MOVIE" else episode
+        abs_num = 1 if match.single_file(row) else episode
         assert abs_num is not None
 
         existing = await db.get_episode(conn, row["anilist_id"], abs_num)

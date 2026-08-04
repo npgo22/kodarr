@@ -62,15 +62,6 @@ def search_titles(series: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(match._strip_season(match.normalize(t)) for t in candidates))
 
 
-def _single_file(series: dict[str, Any]) -> bool:
-    """One release == the whole entry: a movie, or a one-episode OVA/special.
-    Such releases usually carry no episode number, so rank() must accept an
-    unnumbered (but non-batch) result instead of demanding episode == want."""
-    return series["format"] == "MOVIE" or (
-        series["format"] in match.SIDE_FORMATS and (series.get("episodes") or 1) == 1
-    )
-
-
 def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> list[tuple[tuple, dict]]:
     """Preferred-group releases for this exact series+episode; 1080p floor;
     best resolution first, seeders break ties.
@@ -93,7 +84,7 @@ def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> li
         if m is None:
             continue
         _, ep = m
-        if _single_file(series):
+        if match.single_file(series):
             # batches also parse with episode=None; a movie/OVA must not be a batch
             if parsed.episode is None and match.is_batch(res["title"]):
                 continue

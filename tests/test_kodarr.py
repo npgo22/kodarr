@@ -657,3 +657,13 @@ def test_special_rank_accepts_non_preferred_group():
     # a parent-show release is still rejected no matter how well seeded
     parent = {"title": "[SubsPlease] Mushoku Tensei S2 - 01 (1080p) [EC64C8B1].mkv", "seeders": 999}
     assert rank([parent], ERIS, 1) == []
+
+
+def test_single_file_covers_movies_and_one_episode_specials():
+    from kodarr.library.match import single_file
+
+    assert single_file(MOVIE)
+    assert single_file(ERIS)  # 1-episode SPECIAL: disc release has no number
+    assert not single_file(FRIEREN)
+    # a multi-episode OVA run still needs real episode numbers
+    assert not single_file({**ERIS, "episodes": 4})

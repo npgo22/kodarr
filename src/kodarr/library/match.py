@@ -25,6 +25,16 @@ _FILLER = {
 }
 
 
+def single_file(row: dict[str, Any]) -> bool:
+    """One release/file *is* the whole entry: a movie, or a one-episode
+    OVA/special. Such releases carry no episode number, so both the search
+    ranker and the importer have to treat an unnumbered file as episode 1
+    instead of rejecting it."""
+    return row["format"] == "MOVIE" or (
+        row["format"] in SIDE_FORMATS and (row.get("episodes") or 1) == 1
+    )
+
+
 def special_anchors(row: dict[str, Any]) -> set[str]:
     """Words that identify a special in *both* of its canonical names.
 
