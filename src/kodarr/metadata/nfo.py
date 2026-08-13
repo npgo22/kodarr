@@ -267,8 +267,6 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
             # Nekomonogatari -> TVDB/TMDB S0 E5-8): explicit per-season mapping
             tmdb_season = season_map.get("tvdbseason", tmdb_season)
             tmdb_off = season_map.get("offset", 0)
-        elif am is not None:
-            tmdb_off = am["episode_offset"]
         else:
             cur = await conn.execute(
                 """SELECT COALESCE(SUM(sib.episodes), 0) AS off
@@ -276,7 +274,15 @@ async def refresh_series(conn, http: httpx.AsyncClient, tmdb_client, s: dict[str
                    WHERE im.tmdb_tv_id = %s AND im.tmdb_season = %s AND sib.season < %s""",
                 (idmap["tmdb_tv_id"], idmap["tmdb_season"], s.get("season") or 1),
             )
-            tmdb_off = (await cur.fetchone())["off"]
+            sib_off = (await cur.fetchone())["off"]
+            # AniDB counts from the start of *its own* anime, so a whole-season
+            # entry reports offset 0 — right for AniDB, wrong for a TMDB show
+            # that numbers straight through (TMDB has Re:ZERO as one 85-episode
+            # season, so S4E12 is TMDB episode 78, not 12, and every episode
+            # got season-1 titles). Only the sibling sum knows how many of our
+            # entries precede this one inside that single TMDB season; take
+            # whichever offset accounts for more.
+            tmdb_off = max(sib_off, (am or {}).get("episode_offset") or 0)
         tmdb_eps = await tmdb_client.season_episodes(idmap["tmdb_tv_id"], tmdb_season)
         # include episodes on disk beyond the counted range (web extras like
         # Bakemonogatari 13-15 live past `episodes` but exist upstream)
