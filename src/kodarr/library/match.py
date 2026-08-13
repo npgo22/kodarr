@@ -97,6 +97,31 @@ def _entry_season(names: set[str]) -> int:
     return 1
 
 
+def _franchise_offset(row: dict[str, Any]) -> int:
+    """Episodes aired before this entry across the whole franchise.
+
+    Groups split into two camps for a long-running show: per-cour numbering
+    ("4th Season - 12") and franchise-absolute ("- 78"). SubsPlease uses the
+    latter, so for a preferred-group release this is the offset that turns the
+    release number back into an AniList episode. Computed in SQL (see
+    db._WITH_SYNONYMS); 0 when unknown, which disables the whole path.
+    """
+    return row.get("franchise_offset") or 0
+
+
+def _entry_total(row: dict[str, Any]) -> int:
+    """Episode count for the entry — while airing AniList leaves episodes NULL,
+    so fall back to what has aired (+1 for the one dropping right now)."""
+    return row.get("episodes") or (row.get("aired") or 0) + 1
+
+
+def _lands_in_entry(episode: int | None, row: dict[str, Any], offset: int) -> bool:
+    """Does this release number, read as offset-based, fall inside the entry?"""
+    if not offset or episode is None:
+        return False
+    return 1 <= episode - offset <= _entry_total(row)
+
+
 @dataclass
 class ParsedRelease:
     title: str
@@ -198,8 +223,12 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
                 continue  # release names a different cour than this entry
             if parsed.season is None and entry_season > 1 and row["episode_offset"] == 0:
                 # unseasoned release + later-season entry with no absolute-numbering
-                # offset: this is a season-1-era file, not ours
-                continue
+                # offset: this is a season-1-era file, not ours — unless the
+                # number is franchise-absolute. SubsPlease numbers long-running
+                # shows straight through ("Re Zero ... - 78" is S4E12), so the
+                # preferred group's own releases would otherwise never match.
+                if not _lands_in_entry(parsed.episode, row, _franchise_offset(row)):
+                    continue
         elif parsed.season:
             # a cour-tagged release is the parent show, never the special —
             # except S00, which *is* the specials season
@@ -207,13 +236,18 @@ def match(parsed: ParsedRelease, series_rows: list[dict[str, Any]]) -> tuple[dic
         ep = None
         if parsed.episode is not None:
             # while airing, episodes is NULL on AniList — cap at aired+1
-            total = row.get("episodes") or (row.get("aired") or 0) + 1
+            total = _entry_total(row)
             if parsed.season is not None:
                 # season-tagged releases number per cour, except split-cour
                 # packs that number the whole season continuously
                 candidates = [parsed.episode, parsed.episode - row["episode_offset"]]
             else:
-                candidates = [parsed.episode - row["episode_offset"]]
+                # untagged: either the entry's own (AniDB cour) numbering, or
+                # franchise-absolute as SubsPlease writes it. Cour numbering is
+                # tried first so a season-1-era file can never be re-read as a
+                # later cour's episode.
+                candidates = [parsed.episode - row["episode_offset"],
+                              parsed.episode - _franchise_offset(row)]
             ep = next((c for c in candidates if 1 <= c <= total), None)
             if ep is None:
                 continue  # right title, wrong entry (e.g. sequel cour)

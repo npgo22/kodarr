@@ -50,7 +50,13 @@ def _merge_synonyms(row: dict) -> dict:
 
 # AniDB aliases are joined in (not stored on series) so a weekly refresh takes
 # effect immediately and series.synonyms stays purely AniList-sourced
-_WITH_SYNONYMS = """SELECT s.*, COALESCE(t.synonyms, '{}') AS _extra_synonyms
+_WITH_SYNONYMS = """SELECT s.*, COALESCE(t.synonyms, '{}') AS _extra_synonyms,
+                           COALESCE((SELECT SUM(COALESCE(p.episodes, p.aired, 0))
+                                     FROM series p
+                                     WHERE p.show_key = s.show_key
+                                       AND p.season < s.season
+                                       AND p.format NOT IN ('MOVIE', 'SPECIAL', 'OVA')
+                                    ), 0)::int AS franchise_offset
                     FROM series s LEFT JOIN title_synonyms t USING (anilist_id)"""
 
 

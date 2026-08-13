@@ -26,6 +26,22 @@ def search_query(title: str, ep: int | None, fmt: str, episode_offset: int) -> s
     return f"{title} {ep + episode_offset:02d}"
 
 
+def search_queries(title: str, ep: int | None, series: dict[str, Any]) -> list[str]:
+    """Every numbering a release of this episode might carry, best first.
+
+    A long-running show gets released under two conventions at once: per-cour
+    ("4th Season - 12") and franchise-absolute ("Re Zero ... - 78"). SubsPlease
+    — the preferred group — uses the latter, so searching only the cour number
+    finds nothing at all for a 4th season.
+    """
+    base = search_query(title, ep, series["format"], series["episode_offset"])
+    if ep is None or not base.endswith(f"{ep + series['episode_offset']:02d}"):
+        return [base]  # movie/special: bare title, no number to vary
+    absolute = ep + (series.get("franchise_offset") or 0)
+    extra = f"{title} {absolute:02d}"
+    return [base] if extra == base else [base, extra]
+
+
 def normalize_base(series: dict[str, Any]) -> str:
     """The franchise name a group would actually type: the show root's title,
     pre-colon ("Mushoku Tensei"), falling back to this entry's own title."""
@@ -135,15 +151,17 @@ async def backfill_series(
         ranked = []
         best = None
         for title in titles:
-            query = search_query(title, ep, series["format"], series["episode_offset"])
-            try:
-                results = await rss.nyaa_search(http, query, nyaa_url)
-            except Exception as e:
-                log.error("nyaa search failed", extra={"event": "error", "query": query, "error": str(e)})
-                return
-            ranked = rank(results, series, ep)
-            if ranked:
-                best = ranked[0][1]
+            for query in search_queries(title, ep, series):
+                try:
+                    results = await rss.nyaa_search(http, query, nyaa_url)
+                except Exception as e:
+                    log.error("nyaa search failed", extra={"event": "error", "query": query, "error": str(e)})
+                    return
+                ranked = rank(results, series, ep)
+                if ranked:
+                    best = ranked[0][1]
+                    break
+            if best:
                 break
         if best is None:
             log.info("nothing found", extra={"event": "search_miss", "anilist_id": series["anilist_id"], "episode": ep})

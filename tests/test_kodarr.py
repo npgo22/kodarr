@@ -667,3 +667,59 @@ def test_single_file_covers_movies_and_one_episode_specials():
     assert not single_file(FRIEREN)
     # a multi-episode OVA run still needs real episode numbers
     assert not single_file({**ERIS, "episodes": 4})
+
+
+# Re:ZERO: AniList splits the franchise into five entries that each restart at
+# 1, but SubsPlease — the preferred group — numbers straight through, so
+# "Re Zero ... - 78" is season 4 episode 12. Searching only the cour number
+# found nothing at all, leaving S4 stuck at 0/19.
+REZERO_S1 = {
+    "anilist_id": 21355,
+    "title": "Re:ZERO -Starting Life in Another World-",
+    "year": 2016,
+    "format": "TV",
+    "episodes": 25,
+    "synonyms": ["Re:Zero kara Hajimeru Isekai Seikatsu"],
+    "episode_offset": 0,
+    "franchise_offset": 0,
+    "root_path": "/data/media/anime",
+    "preferred_group": "SubsPlease",
+}
+REZERO_S4 = {
+    **REZERO_S1,
+    "anilist_id": 189046,
+    "title": "Re:ZERO -Starting Life in Another World- Season 4",
+    "synonyms": ["Re:Zero kara Hajimeru Isekai Seikatsu 4th Season"],
+    "episodes": 19,
+    "aired": 11,
+    "episode_offset": 0,
+    "franchise_offset": 66,  # 25 + 13 + 12 + 16 aired before this entry
+}
+
+
+def test_franchise_absolute_release_routes_to_current_season():
+    p = match.parse("[SubsPlease] Re Zero kara Hajimeru Isekai Seikatsu - 78 (1080p) [30D08902].mkv")
+    assert p and p.season is None and p.episode == 78
+    m = match.match(p, [REZERO_S1, REZERO_S4])
+    assert m and m[0]["anilist_id"] == 189046 and m[1] == 12
+
+
+def test_franchise_absolute_does_not_steal_a_season_one_episode():
+    # the same group's season-1 file is a bare "- 12"; it must stay on S1 even
+    # with the later entry checked first
+    p = match.parse("[SubsPlease] Re Zero kara Hajimeru Isekai Seikatsu - 12 (1080p).mkv")
+    assert p
+    m = match.match(p, [REZERO_S4, REZERO_S1])
+    assert m and m[0]["anilist_id"] == 21355 and m[1] == 12
+
+
+def test_search_asks_for_both_numberings():
+    from kodarr.acquire.backfill import search_queries
+    qs = search_queries("re zero kara hajimeru isekai seikatsu", 12, REZERO_S4)
+    assert "re zero kara hajimeru isekai seikatsu 78" in qs
+    assert "re zero kara hajimeru isekai seikatsu 12" in qs
+
+
+def test_search_has_no_duplicate_query_without_a_franchise_offset():
+    from kodarr.acquire.backfill import search_queries
+    assert search_queries("sousou no frieren", 5, FRIEREN) == ["sousou no frieren 05"]
