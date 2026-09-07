@@ -20,6 +20,38 @@ from kodarr.library.match import VIDEO_EXTS
 log = logging.getLogger(__name__)
 
 
+def _ranges(nums: list[int]) -> str:
+    """[1,2,3,5,7,8] -> '1-3, 5, 7-8'. A back-catalogue sweep is unreadable
+    as a list of every episode number it touched."""
+    out: list[str] = []
+    start = prev = nums[0]
+    for n in nums[1:] + [None]:  # type: ignore[list-item]
+        if n is not None and n == prev + 1:
+            prev = n
+            continue
+        out.append(str(start) if start == prev else f"{start}-{prev}")
+        if n is not None:
+            start = prev = n
+    return ", ".join(out)
+
+
+def _group_pushed(
+    pushed: list[tuple[str, int, str, bool]],
+) -> dict[tuple[str, bool], list[tuple[int, str]]]:
+    """Collapse per-file rows into one bucket per (series, was_upgrade).
+
+    Deduplicates: a sweep can hand the same episode back more than once when a
+    pack covers overlapping cours, and the notification should not repeat it.
+    Insertion-ordered so the message order matches the import order.
+    """
+    out: dict[tuple[str, bool], list[tuple[int, str]]] = {}
+    for series, ep, group, upgraded in pushed:
+        bucket = out.setdefault((series, upgraded), [])
+        if (ep, group) not in bucket:
+            bucket.append((ep, group))
+    return out
+
+
 def _video_files(path: Path) -> list[Path]:
     if path.is_file():
         return [path] if path.suffix.lower() in VIDEO_EXTS else []
@@ -188,20 +220,25 @@ async def import_path(
         for d in touched_dirs:
             await jellyfin.notify(d)
 
-    # One push per import_path call, not per file: a season pack lands as a
-    # single batch and 12 separate notifications for it would be noise. Sent
-    # last so the push only claims what actually made it onto disk.
+    # One message per series per kind, not one line per file. A seadex sweep
+    # re-imports whole back catalogues -- the first run after this shipped
+    # pushed 22 episodes of one show and 33 of another as two walls of nearly
+    # identical lines, which said nothing about whether anything was actually
+    # grabbed. Sent last so a push only ever claims what reached disk.
     if gotify and pushed:
-        if len(pushed) == 1:
-            title, ep, group, upgraded = pushed[0]
+        for (series, upgraded), eps in _group_pushed(pushed).items():
+            nums = sorted({e for e, _ in eps})
+            groups = sorted({g for _, g in eps if g and g != "?"})
+            # An upgrade replaced a file that was already there; a download is
+            # new. Leading with the verb is the whole point -- "Upgraded" must
+            # never read as "you got a new episode".
             verb = "Upgraded" if upgraded else "Downloaded"
-            await gotify.notify(title, f"{verb} episode {ep} [{group}]")
-        else:
-            shows = sorted({p[0] for p in pushed})
-            head = shows[0] if len(shows) == 1 else f"{len(pushed)} episodes"
-            lines = [
-                f"{t} - episode {ep} [{g}]{' (upgrade)' if up else ''}"
-                for t, ep, g, up in pushed
-            ]
-            await gotify.notify(head, "\n".join(lines))
+            what = (
+                f"episode {nums[0]}" if len(nums) == 1
+                else f"{len(nums)} episodes ({_ranges(nums)})"
+            )
+            # Unknown group prints nothing rather than "[?]" -- seadex releases
+            # often have no parseable group and the placeholder was just noise.
+            suffix = f" [{', '.join(groups)}]" if groups else ""
+            await gotify.notify(series, f"{verb} {what}{suffix}")
     return imported

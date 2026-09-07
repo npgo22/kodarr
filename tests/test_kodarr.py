@@ -294,6 +294,25 @@ def test_ensure_conn_reconnects_when_closed(monkeypatch):
     assert d.conn is fresh
 
 
+def test_notification_ranges_and_grouping():
+    from kodarr.library.importer import _group_pushed, _ranges
+
+    assert _ranges([3]) == "3"
+    assert _ranges([1, 2, 3, 5, 7, 8]) == "1-3, 5, 7-8"
+    assert _ranges([1, 2, 3]) == "1-3"
+
+    # same episode handed back twice (overlapping cours in one pack) collapses,
+    # and downloads never get merged into the upgrade bucket
+    g = _group_pushed([
+        ("Show", 1, "smol", True),
+        ("Show", 1, "smol", True),
+        ("Show", 2, "smol", True),
+        ("Show", 9, "SubsPlease", False),
+    ])
+    assert g[("Show", True)] == [(1, "smol"), (2, "smol")]
+    assert g[("Show", False)] == [(9, "SubsPlease")]
+
+
 def test_gotify_notify():
     import asyncio
     import json
