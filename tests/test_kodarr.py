@@ -294,6 +294,30 @@ def test_ensure_conn_reconnects_when_closed(monkeypatch):
     assert d.conn is fresh
 
 
+def test_import_file_reports_noop_vs_real_change(tmp_path):
+    """Re-importing a file the library is already hardlinked to changes
+    nothing, and must not be reported as an upgrade."""
+    from kodarr.library import organize
+
+    src = tmp_path / "dl" / "ep.mkv"
+    src.parent.mkdir()
+    src.write_bytes(b"video")
+    dest = tmp_path / "lib" / "Show S01E001.mkv"
+
+    # first import: a real change
+    assert organize.import_file(src, dest) is True
+    assert dest.exists() and dest.samefile(src)
+
+    # same source, same dest -> already the same inode, nothing to do
+    assert organize.import_file(src, dest) is False
+
+    # a genuinely different file replacing it IS a real change
+    better = tmp_path / "dl" / "ep-better.mkv"
+    better.write_bytes(b"better video")
+    assert organize.import_file(better, dest, replace=dest) is True
+    assert dest.read_bytes() == b"better video"
+
+
 def test_notification_ranges_and_grouping():
     from kodarr.library.importer import _group_pushed, _ranges
 

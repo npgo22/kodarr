@@ -47,10 +47,22 @@ def dest_path(series: dict[str, Any], episode: int | None, group: str | None, ex
     return series_dir(series) / name
 
 
-def import_file(src: Path, dest: Path, *, replace: Path | None = None) -> None:
+def import_file(src: Path, dest: Path, *, replace: Path | None = None) -> bool:
     """Hardlink src into the library (copy fallback across filesystems).
     Optionally delete the file being upgraded away. Never deletes src —
-    torrents keep seeding from the downloads dir."""
+    torrents keep seeding from the downloads dir.
+
+    Returns True if the library actually changed, False if this was a no-op.
+
+    The no-op case is common and used to be invisible: a sweep re-offers a
+    torrent that was already imported, and because the library file IS a
+    hardlink of that torrent, re-importing hardlinks the same inode over the
+    same path. Nothing changes on disk -- and when the release name is
+    unchanged, `replace == dest` so nothing is deleted either -- but callers
+    could not tell that apart from a real upgrade, so it was reported as one.
+    """
+    if dest.exists() and dest.samefile(src):
+        return False
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".partial")
     tmp.unlink(missing_ok=True)  # stale partial from an interrupted import
@@ -62,3 +74,4 @@ def import_file(src: Path, dest: Path, *, replace: Path | None = None) -> None:
     if replace and replace != dest and replace.exists():
         replace.unlink()
         log.info("removed replaced file", extra={"event": "replace", "path": str(replace)})
+    return True

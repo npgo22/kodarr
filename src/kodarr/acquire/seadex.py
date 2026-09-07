@@ -10,7 +10,7 @@ from psycopg import AsyncConnection
 from seadex import EntryNotFoundError, SeaDexEntry, TorrentRecord
 
 from kodarr import db
-from kodarr.clients import Qbit
+from kodarr.clients import Gotify, Qbit
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ async def sweep_series(
     *,
     dry_run: bool = False,
     force: bool = False,
+    gotify: Gotify | None = None,
 ) -> None:
     # every check that can skip the SeaDex API call comes before it
     if series["format"] != "MOVIE" and series["status"] == "RELEASING":
@@ -96,15 +97,24 @@ async def sweep_series(
         return
     await qbit.add(magnet(best))
     await db.insert_grab(conn, series["anilist_id"], None, "seadex", "qbittorrent", best.infohash, release_name)
+    # A seadex grab is a whole-release swap, not one episode, so it says so
+    # rather than inventing an episode number it does not have.
+    if gotify:
+        await gotify.notify(
+            series["title"],
+            "Grabbed a better release"
+            + (f" [{best.release_group}]" if best.release_group else "")
+            + " - downloading via seadex",
+        )
 
 
 async def sweep_all(
     conn: AsyncConnection, seadex_entry: SeaDexEntry, qbit: Qbit,
-    *, dry_run: bool = False, force: bool = False,
+    *, dry_run: bool = False, force: bool = False, gotify: Gotify | None = None,
 ) -> None:
     for series in await db.monitored_series(conn):
         try:
-            await sweep_series(conn, seadex_entry, qbit, series, dry_run=dry_run, force=force)
+            await sweep_series(conn, seadex_entry, qbit, series, dry_run=dry_run, force=force, gotify=gotify)
         except Exception:
             log.exception("seadex sweep failed", extra={"event": "error", "anilist_id": series["anilist_id"]})
         await asyncio.sleep(1)  # be polite to SeaDex — it's a small community service

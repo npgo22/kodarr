@@ -78,7 +78,10 @@ class Daemon:
     async def rss_pass(self) -> None:
         for feed in self.cfg.rss_feeds:
             for title, link in await rss.fetch_items(self.http, feed, self.rss_cache):
-                await grab.consider(self.conn, self.qbit, title, link, "rss", dry_run=self.cfg.dry_run)
+                await grab.consider(
+                    self.conn, self.qbit, title, link, "rss",
+                    dry_run=self.cfg.dry_run, gotify=self.gotify,
+                )
 
     async def watch_pass(self) -> None:
         for g in await db.expire_stale_grabs(self.conn):
@@ -131,11 +134,14 @@ class Daemon:
     async def backfill_pass(self) -> None:
         for s in await db.monitored_series(self.conn):
             await search.backfill_series(
-                self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url, dry_run=self.cfg.dry_run
+                self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url,
+                dry_run=self.cfg.dry_run, gotify=self.gotify,
             )
 
     async def seadex_pass(self) -> None:
-        await seadex_sweep.sweep_all(self.conn, self.seadex, self.qbit, dry_run=self.cfg.dry_run)
+        await seadex_sweep.sweep_all(
+            self.conn, self.seadex, self.qbit, dry_run=self.cfg.dry_run, gotify=self.gotify
+        )
 
     async def handle_autobrr(self, release_name: str, download_url: str) -> bool:
         # Webhooks arrive off the loop schedule, so they need the same guard:
@@ -143,7 +149,8 @@ class Daemon:
         # and the next watch pass is dropped.
         await self._ensure_conn()
         return await grab.consider(
-            self.conn, self.qbit, release_name, download_url, "autobrr", dry_run=self.cfg.dry_run
+            self.conn, self.qbit, release_name, download_url, "autobrr",
+            dry_run=self.cfg.dry_run, gotify=self.gotify,
         )
 
     def run_bg(self, coro) -> None:
@@ -167,8 +174,13 @@ class Daemon:
             if s is None:
                 continue
             try:
-                await search.backfill_series(self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url, dry_run=self.cfg.dry_run)
-                await seadex_sweep.sweep_series(self.conn, self.seadex, self.qbit, s, dry_run=self.cfg.dry_run)
+                await search.backfill_series(
+                    self.conn, self.http, self.qbit, s, nyaa_url=self.cfg.nyaa_url,
+                    dry_run=self.cfg.dry_run, gotify=self.gotify,
+                )
+                await seadex_sweep.sweep_series(
+                    self.conn, self.seadex, self.qbit, s, dry_run=self.cfg.dry_run, gotify=self.gotify
+                )
             except Exception:
                 log.exception("processing new request failed", extra={"event": "error", "anilist_id": anilist_id})
 

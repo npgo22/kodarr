@@ -10,7 +10,7 @@ from psycopg import AsyncConnection
 
 from kodarr import db
 from kodarr.library import match
-from kodarr.clients import Qbit
+from kodarr.clients import Gotify, Qbit
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ async def consider(
     source: str,  # 'rss' | 'autobrr'
     *,
     dry_run: bool = False,
+    gotify: Gotify | None = None,
 ) -> bool:
     """Grab release_name if it's a monitored, missing, not-in-flight episode."""
     parsed = match.parse(release_name)
@@ -72,4 +73,15 @@ async def consider(
     if infohash and len(infohash) == 32:  # base32 magnet (SubsPlease RSS) -> hex, as qbit reports it
         infohash = base64.b32decode(infohash.upper()).hex()
     await db.insert_grab(conn, series["anilist_id"], abs_num, source, "qbittorrent", infohash, release_name)
+    # Announced only after qbit accepted it and the grab is recorded, so the
+    # message cannot promise a download that was never actually started.
+    # Grabs are one episode at a time by construction (consider() handles a
+    # single release), so this needs none of the batching the importer does.
+    if gotify:
+        await gotify.notify(
+            series["title"],
+            f"Grabbed episode {abs_num}"
+            + (f" [{parsed.group}]" if parsed.group else "")
+            + f" - downloading via {source}",
+        )
     return True

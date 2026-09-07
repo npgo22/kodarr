@@ -366,6 +366,8 @@ def test_arr_api_for_seerr(postgres, tmp_path):
         d.cfg = SimpleNamespace(dry_run=True, anime_root=str(tmp_path / "anime"), movie_root=str(tmp_path / "movies"))
         d.conn, d.http, d.tmdb = conn, svc.http, None
         d.qbit, d.jellyfin = svc.qbit, svc.jellyfin
+        # process_new reaches backfill/seadex, both of which now take gotify
+        d.gotify = Gotify(svc.http, "", "")  # unconfigured -> notify is a no-op
         d._bg = set()
 
         client = TestClient(TestServer(api.build_app(d, "tok")))

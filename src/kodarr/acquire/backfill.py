@@ -11,7 +11,7 @@ from psycopg import AsyncConnection
 from kodarr import db
 from kodarr.library import match
 from kodarr.acquire import feeds as rss
-from kodarr.clients import Qbit
+from kodarr.clients import Gotify, Qbit
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +123,7 @@ async def backfill_series(
     nyaa_url: str = "https://nyaa.si",
     dry_run: bool = False,
     force: bool = False,
+    gotify: Gotify | None = None,
 ) -> None:
     """Search + grab every aired-but-missing episode of one series.
 
@@ -180,5 +181,9 @@ async def backfill_series(
         await db.insert_grab(
             conn, series["anilist_id"], ep, "search", "qbittorrent", best.get("infohash"), best["title"]
         )
+        if gotify:
+            await gotify.notify(
+                series["title"], f"Grabbed episode {ep} - downloading via search"
+            )
     if not dry_run:
         await db.mark_searched(conn, series["anilist_id"])

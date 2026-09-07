@@ -183,7 +183,7 @@ async def import_path(
             replace = Path(existing["file_path"])
 
         dest = organize.dest_path(row, abs_num, parsed.group, src.suffix.lower())
-        organize.import_file(src, dest, replace=replace)
+        changed = organize.import_file(src, dest, replace=replace)
         await db.upsert_episode(conn, row["anilist_id"], abs_num, str(dest), parsed.group, from_seadex, src.name)
         if row["format"] != "MOVIE":
             # placeholder title now; refresh_series below fills real titles
@@ -191,7 +191,10 @@ async def import_path(
         touched_dirs.add(str(dest.parent))
         imported_entries[row["anilist_id"]] = row
         imported += 1
-        pushed.append((row["title"], abs_num, parsed.group or "?", bool(replace)))
+        # Only a real change is worth telling a person about. A re-import that
+        # hardlinked the same inode over the same path upgraded nothing.
+        if changed:
+            pushed.append((row["title"], abs_num, parsed.group or "?", bool(replace)))
         log.info(
             "imported",
             extra={
