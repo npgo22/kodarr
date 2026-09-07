@@ -19,7 +19,7 @@ from kodarr import daemon as daemon_mod
 from kodarr import db
 from kodarr.acquire import announce as grab
 from kodarr.acquire import backfill as search
-from kodarr.clients import Jellyfin, Qbit
+from kodarr.clients import Gotify, Jellyfin, Qbit
 
 PG_PORT = 54331
 DSN = f"postgresql://postgres:test@127.0.0.1:{PG_PORT}/kodarr"
@@ -160,6 +160,7 @@ def test_announce_to_library(postgres, tmp_path):
         d = object.__new__(daemon_mod.Daemon)  # skip __init__: wire fakes directly
         d.cfg, d.conn, d.qbit, d.jellyfin = SimpleNamespace(dry_run=False), conn, svc.qbit, svc.jellyfin
         d.http, d.tmdb = svc.http, None
+        d.gotify = Gotify(svc.http, "", "")  # unconfigured -> notify is a no-op
         await d.watch_pass()
 
         ep = await db.get_episode(conn, 154587, 3)
