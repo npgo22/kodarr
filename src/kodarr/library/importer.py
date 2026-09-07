@@ -1,4 +1,4 @@
-"""Import completed downloads into the library and notify Jellyfin."""
+"""Import completed downloads into the library, then notify Jellyfin and Gotify."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from kodarr import db
 from kodarr.library import match
 from kodarr.metadata import nfo
 from kodarr.library import organize
-from kodarr.clients import Jellyfin
+from kodarr.clients import Gotify, Jellyfin
 from kodarr.library.match import VIDEO_EXTS
 
 log = logging.getLogger(__name__)
@@ -73,12 +73,15 @@ async def import_path(
     tmdb=None,  # Tmdb client; enriches titles/stills at import time
     series: dict[str, Any] | None = None,  # known from the grab; else matched by title
     from_seadex: bool = False,
+    gotify: Gotify | None = None,
 ) -> int:
     """Import every video file under path. Returns number of files imported."""
     all_series = await db.monitored_series(conn)
     imported = 0
     touched_dirs: set[str] = set()
     imported_entries: dict[int, dict] = {}
+    # (series title, episode, group, was_upgrade) per file, for one summary push
+    pushed: list[tuple[str, int, str, bool]] = []
 
     for src in _video_files(path):
         parsed = match.parse(src.name)
@@ -156,6 +159,7 @@ async def import_path(
         touched_dirs.add(str(dest.parent))
         imported_entries[row["anilist_id"]] = row
         imported += 1
+        pushed.append((row["title"], abs_num, parsed.group or "?", bool(replace)))
         log.info(
             "imported",
             extra={
@@ -183,4 +187,21 @@ async def import_path(
     if jellyfin:
         for d in touched_dirs:
             await jellyfin.notify(d)
+
+    # One push per import_path call, not per file: a season pack lands as a
+    # single batch and 12 separate notifications for it would be noise. Sent
+    # last so the push only claims what actually made it onto disk.
+    if gotify and pushed:
+        if len(pushed) == 1:
+            title, ep, group, upgraded = pushed[0]
+            verb = "Upgraded" if upgraded else "Downloaded"
+            await gotify.notify(title, f"{verb} episode {ep} [{group}]")
+        else:
+            shows = sorted({p[0] for p in pushed})
+            head = shows[0] if len(shows) == 1 else f"{len(pushed)} episodes"
+            lines = [
+                f"{t} - episode {ep} [{g}]{' (upgrade)' if up else ''}"
+                for t, ep, g, up in pushed
+            ]
+            await gotify.notify(head, "\n".join(lines))
     return imported

@@ -14,6 +14,14 @@ downloads = "/data/downloads"
 url = "http://jellyfin.media.svc:8096"
 api_key = ""
 
+# Optional. Pushes one notification per import (a season pack is one message,
+# not twelve). Omit the section, or leave either field empty, to disable.
+# The token can also come from KODARR_GOTIFY_TOKEN.
+[gotify]
+url = "http://gotify.monitor.svc:8080"
+token = ""
+priority = 5
+
 [nyaa]
 # url = "https://nyaa.si"
 

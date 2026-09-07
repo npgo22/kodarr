@@ -264,6 +264,53 @@ def test_jellyfin_path_translation():
     assert seen == ["/media/media/anime/Show [anilist-1]"]
 
 
+def test_gotify_notify():
+    import asyncio
+    import json
+
+    import httpx
+
+    from kodarr.clients import Gotify
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((str(request.url), json.loads(request.read())))
+        return httpx.Response(200, json={"id": 1})
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        await Gotify(http, "http://gotify/", "tok", 4).notify("Show", "Downloaded episode 3 [SubsPlease]")
+        # no token configured -> must stay silent, not raise and not POST
+        await Gotify(http, "http://gotify", "").notify("Show", "ignored")
+
+    asyncio.run(main())
+    assert len(seen) == 1
+    url, body = seen[0]
+    assert "token=tok" in url
+    assert body["title"] == "Show"
+    assert body["message"] == "Downloaded episode 3 [SubsPlease]"
+    assert body["priority"] == 4
+
+
+def test_gotify_failure_does_not_raise():
+    """A push that cannot be delivered must never fail an import."""
+    import asyncio
+
+    import httpx
+
+    from kodarr.clients import Gotify
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    async def main():
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        await Gotify(http, "http://gotify", "tok").notify("Show", "msg")
+
+    asyncio.run(main())  # must complete without raising
+
+
 def test_no_match():
     p = match.parse("[SubsPlease] Some Other Show - 01 (1080p).mkv")
     assert p

@@ -23,6 +23,9 @@ class Config:
     qbit_user: str
     qbit_pass: str
     qbit_category: str
+    gotify_url: str = ""  # empty disables push entirely
+    gotify_token: str = ""
+    gotify_priority: int = 5
     tmdb_api_key: str = ""
     anidb_cache: str = "/data/media/.kodarr-cache"  # Shoko Anime_HTTP.zip lives here (media PVC)
     anidb_client: str = ""  # registered AniDB HTTP-API client name; empty = cache-only
@@ -61,6 +64,9 @@ def load(path: str | Path = "config.toml") -> Config:
         qbit_user=_env("QBIT_USER", get("qbittorrent", "user")),
         qbit_pass=_env("QBIT_PASS", get("qbittorrent", "pass")),
         qbit_category=get("qbittorrent", "category", "kodarr"),
+        gotify_url=get("gotify", "url"),
+        gotify_token=_env("GOTIFY_TOKEN", get("gotify", "token")),
+        gotify_priority=int(get("gotify", "priority", 5)),
         tmdb_api_key=_env("TMDB_API_KEY", get("tmdb", "api_key")),
         anidb_cache=get("anidb", "cache_dir", "/data/media/.kodarr-cache"),
         anidb_client=get("anidb", "client", ""),

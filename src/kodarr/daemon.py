@@ -23,7 +23,7 @@ from kodarr.metadata import nfo
 from kodarr.acquire import feeds as rss
 from kodarr.acquire import backfill as search
 from kodarr.acquire import seadex as seadex_sweep
-from kodarr.clients import Jellyfin, Qbit
+from kodarr.clients import Gotify, Jellyfin, Qbit
 from kodarr.config import Config
 from kodarr.metadata.tmdb import Tmdb
 
@@ -42,6 +42,7 @@ class Daemon:
             self.http, cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_path_from, cfg.jellyfin_path_to
         )
         self.seadex = SeaDexEntry()
+        self.gotify = Gotify(self.http, cfg.gotify_url, cfg.gotify_token, cfg.gotify_priority)
         self.tmdb = Tmdb(self.http, cfg.tmdb_api_key)
         self.rss_cache: dict[str, dict[str, str]] = {}
         self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive
@@ -89,7 +90,8 @@ class Daemon:
             series = await db.get_series(self.conn, g["anilist_id"])
             n = await importer.import_path(
                 self.conn, self.jellyfin, path, http=self.http, tmdb=self.tmdb,
-                series=series, from_seadex=g["source"] == "seadex"
+                series=series, from_seadex=g["source"] == "seadex",
+                gotify=self.gotify,
             )
         except Exception:
             log.exception("import failed", extra={"event": "error", "release": g["release_name"]})

@@ -1,4 +1,4 @@
-"""Thin API wrappers: qBittorrent and Jellyfin."""
+"""Thin API wrappers: qBittorrent, Jellyfin and Gotify."""
 
 from __future__ import annotations
 
@@ -82,3 +82,39 @@ class Jellyfin:
         except httpx.HTTPError as e:
             # import already succeeded; a failed refresh must not fail the pipeline
             log.error("jellyfin refresh failed", extra={"event": "error", "error": str(e)})
+
+
+class Gotify:
+    """Outbound push for things a human wants to know about.
+
+    Only imports are worth a push. Grabs are not: a grab is a promise, and the
+    interesting half is whether it landed -- announcing both would double every
+    episode's notification for no added information.
+    """
+
+    def __init__(self, client: httpx.AsyncClient, url: str, token: str, priority: int = 5):
+        self.http, self.url, self.token, self.priority = client, url.rstrip("/"), token, priority
+
+    async def notify(self, title: str, message: str) -> None:
+        # Unconfigured is the normal state for anyone who has not set a token,
+        # so it must be silent rather than an error on every import.
+        if not (self.url and self.token):
+            return
+        try:
+            r = await self.http.post(
+                f"{self.url}/message",
+                params={"token": self.token},
+                json={
+                    # gotify rejects an empty message, and truncates nothing
+                    # itself -- these bounds match the server's own limits.
+                    "title": title[:100],
+                    "message": (message or "(no detail)")[:4000],
+                    "priority": self.priority,
+                },
+            )
+            r.raise_for_status()
+            log.info("gotify notify", extra={"event": "gotify_notify", "title": title})
+        except httpx.HTTPError as e:
+            # Same rule as jellyfin above: the media is already on disk. A push
+            # that cannot be delivered is not a reason to fail the import.
+            log.error("gotify notify failed", extra={"event": "error", "error": str(e)})
