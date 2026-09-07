@@ -264,6 +264,36 @@ def test_jellyfin_path_translation():
     assert seen == ["/media/media/anime/Show [anilist-1]"]
 
 
+def test_ensure_conn_reconnects_when_closed(monkeypatch):
+    """A closed connection must be replaced, not reused forever."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from kodarr import daemon as daemon_mod
+
+    fresh = SimpleNamespace(closed=False)
+
+    async def fake_connect(dsn):
+        assert dsn == "dsn://x"
+        return fresh
+
+    monkeypatch.setattr(daemon_mod.db, "connect", fake_connect)
+
+    d = object.__new__(daemon_mod.Daemon)
+    d.cfg = SimpleNamespace(db_dsn="dsn://x")
+
+    # healthy connection is left alone
+    healthy = SimpleNamespace(closed=False)
+    d.conn = healthy
+    asyncio.run(d._ensure_conn())
+    assert d.conn is healthy
+
+    # closed one is swapped for a new connection
+    d.conn = SimpleNamespace(closed=True)
+    asyncio.run(d._ensure_conn())
+    assert d.conn is fresh
+
+
 def test_gotify_notify():
     import asyncio
     import json

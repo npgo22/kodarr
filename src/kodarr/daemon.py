@@ -47,11 +47,29 @@ class Daemon:
         self.rss_cache: dict[str, dict[str, str]] = {}
         self._bg: set[asyncio.Task] = set()  # keep fire-and-forget tasks alive
 
+    async def _ensure_conn(self) -> None:
+        """Reopen the shared connection if Postgres closed it.
+
+        Every pass reads self.conn fresh, so swapping the attribute is enough to
+        heal all of them at once -- nothing caches the connection object.
+        """
+        if not self.conn.closed:
+            return
+        log.warning("db connection closed, reconnecting", extra={"event": "db_reconnect"})
+        self.conn = await db.connect(self.cfg.db_dsn)
+
     async def _every(self, seconds: int, fn, name: str, first_delay: int = 0) -> None:
         # stagger the daily passes so they don't all hit AniList at boot
         await asyncio.sleep(first_delay)
         while True:
             try:
+                # A restart of Postgres kills this process's connection for
+                # good: psycopg does not redial, so without this check every
+                # later pass raises "the connection is closed" forever while the
+                # daemon still looks healthy. On 2026-09-06 that cost five hours
+                # of missed RSS -- the pod never restarted and never went
+                # unready, it just silently stopped acquiring anything.
+                await self._ensure_conn()
                 await fn()
             except Exception:
                 log.exception("loop iteration failed", extra={"event": "error", "loop": name})
@@ -120,6 +138,10 @@ class Daemon:
         await seadex_sweep.sweep_all(self.conn, self.seadex, self.qbit, dry_run=self.cfg.dry_run)
 
     async def handle_autobrr(self, release_name: str, download_url: str) -> bool:
+        # Webhooks arrive off the loop schedule, so they need the same guard:
+        # otherwise an announce landing in the window between a Postgres restart
+        # and the next watch pass is dropped.
+        await self._ensure_conn()
         return await grab.consider(
             self.conn, self.qbit, release_name, download_url, "autobrr", dry_run=self.cfg.dry_run
         )
@@ -139,6 +161,7 @@ class Daemon:
 
     async def process_new(self, anilist_ids: list[int]) -> None:
         """Backfill + seadex sweep for freshly requested series, without waiting for the daily loops."""
+        await self._ensure_conn()  # also reached from the API, off the loop schedule
         for anilist_id in anilist_ids:
             s = await db.get_series(self.conn, anilist_id)
             if s is None:
