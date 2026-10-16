@@ -88,7 +88,11 @@ async def sweep_series(
     # on AniList and 23 in every release, so "23 >= 26" stayed false and the
     # sweep re-grabbed the same [smol] pack every night for weeks, re-importing
     # the same files and pushing "Upgraded 6 episodes" each time. Grabbing a
-    # release we already grabbed can never improve anything; --force still re-runs.
+    # release we already grabbed can never improve anything.
+    # shortcut: if its files are later deleted the sweep will not fetch this
+    # release again, since only the infohash is checked and not what is on
+    # disk; re-run with --force, or upgrade this to also require that no
+    # from_seadex episode of that group survives.
     if not force and await db.grabbed_before(conn, series["anilist_id"], best.infohash):
         return
 
