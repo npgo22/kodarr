@@ -106,6 +106,21 @@ async def active_grab(conn: AsyncConnection, anilist_id: int, absolute_number: i
     return await cur.fetchone()
 
 
+async def grabbed_before(conn: AsyncConnection, anilist_id: int, client_id: str | None) -> bool:
+    """Has this exact release already been grabbed for this series?
+
+    `active_grab` stops matching once a grab reaches 'imported', so without
+    this a sweep re-grabs the identical torrent every night forever.
+    """
+    if not client_id:
+        return False
+    cur = await conn.execute(
+        "SELECT 1 FROM grabs WHERE anilist_id = %s AND client_id = %s LIMIT 1",
+        (anilist_id, client_id),
+    )
+    return await cur.fetchone() is not None
+
+
 async def insert_grab(
     conn: AsyncConnection, anilist_id: int, absolute_number: int | None,
     source: str, client: str, client_id: str | None, release_name: str,

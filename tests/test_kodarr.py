@@ -843,3 +843,56 @@ def test_search_asks_for_both_numberings():
 def test_search_has_no_duplicate_query_without_a_franchise_offset():
     from kodarr.acquire.backfill import search_queries
     assert search_queries("sousou no frieren", 5, FRIEREN) == ["sousou no frieren 05"]
+
+
+def test_seadex_does_not_regrab_the_same_release():
+    """AniList's episode count can exceed anything ever released -- Monogatari
+    Second Season is 26 there and 23 in every release -- so the "fully
+    upgraded" counts never reach `total` and the sweep re-grabbed the identical
+    [smol] pack nightly for weeks, re-importing the same files each time."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from kodarr.acquire import seadex
+
+    series = {"anilist_id": 17074, "title": "Monogatari Series Second Season",
+              "format": "TV", "episodes": 26, "status": "FINISHED"}
+    best = SimpleNamespace(is_best=True, tracker=SimpleNamespace(is_public=lambda: True),
+                           infohash="0936f1e8", release_group="smol", files=[])
+    entry = SimpleNamespace(from_id=lambda _id: SimpleNamespace(torrents=(best,)))
+
+    class Conn:
+        """23 of 26 episodes present, all already from this seadex release."""
+        def __init__(self, prior_grab): self.prior_grab = prior_grab
+        async def execute(self, sql, args=None):
+            if "FROM grabs" in sql and "client_id" in sql:
+                rows = [{"?column?": 1}] if self.prior_grab else []
+            elif "FROM grabs" in sql:
+                rows = []                      # nothing in flight; last one is 'imported'
+            else:
+                rows = [{"n": 23}]             # from_seadex counts
+            return SimpleNamespace(fetchone=_one(rows), fetchall=_all(rows))
+
+    def _one(rows):
+        async def f(): return rows[0] if rows else None
+        return f
+
+    def _all(rows):
+        async def f(): return rows
+        return f
+
+    class Qbit:
+        def __init__(self): self.added = []
+        async def add(self, magnet): self.added.append(magnet)
+
+    async def main():
+        # already grabbed this infohash -> no second grab, no notification
+        q = Qbit()
+        await seadex.sweep_series(Conn(True), entry, q, series)
+        assert q.added == []
+        # a release never grabbed before is still grabbed
+        q = Qbit()
+        await seadex.sweep_series(Conn(False), entry, q, series)
+        assert len(q.added) == 1
+
+    asyncio.run(main())

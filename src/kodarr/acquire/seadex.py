@@ -83,6 +83,15 @@ async def sweep_series(
     if row and total and row["n"] >= total:
         return
 
+    # Both counts above compare against AniList's episode total, which can be
+    # higher than anything actually released -- Monogatari Second Season is 26
+    # on AniList and 23 in every release, so "23 >= 26" stayed false and the
+    # sweep re-grabbed the same [smol] pack every night for weeks, re-importing
+    # the same files and pushing "Upgraded 6 episodes" each time. Grabbing a
+    # release we already grabbed can never improve anything; --force still re-runs.
+    if not force and await db.grabbed_before(conn, series["anilist_id"], best.infohash):
+        return
+
     release_name = best.files[0].name if best.files else series["title"]
 
     log.info(
