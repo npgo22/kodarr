@@ -79,23 +79,23 @@ def search_titles(series: dict[str, Any]) -> list[str]:
 
 
 def rank(results: list[dict], series: dict[str, Any], want_ep: int | None) -> list[tuple[tuple, dict]]:
-    """Preferred-group releases for this exact series+episode; 1080p floor;
-    best resolution first, seeders break ties.
+    """Releases for this exact series+episode; 1080p floor; preferred group
+    first, then resolution, then seeders.
 
-    Specials relax the group filter to a preference. They ship on the disc, so
-    a simulcast group like SubsPlease never releases one — hard-filtering on it
-    means a special can never be found at all. The strict anchor-word match in
-    match() is what keeps this from grabbing the wrong thing.
+    The preferred group is a *preference*, never a filter. It used to be a hard
+    filter for everything but specials, which meant any show the preferred group
+    does not carry could never be found at all: Steel Ball Run is a Netflix
+    title SubsPlease has never touched, so backfill logged "nothing found" for
+    every episode while Erai-raws had all of them at 1080p. Sorting still puts a
+    preferred-group release first whenever one exists, so this only ever adds
+    options. match() is what guarantees the release is actually this episode.
     """
-    side = series["format"] in match.SIDE_FORMATS
     scored = []
     for res in results:
         parsed = match.parse(res["title"])
         if parsed is None:
             continue
         preferred = bool(parsed.group) and parsed.group.lower() == series["preferred_group"].lower()
-        if not preferred and not side:
-            continue
         m = match.match(parsed, [series])
         if m is None:
             continue

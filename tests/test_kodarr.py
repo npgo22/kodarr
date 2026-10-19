@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from kodarr.acquire import backfill
 from kodarr.library import match
 from kodarr.library import organize
 
@@ -237,8 +240,10 @@ def test_rank_preferred_group_resolution_then_seeders():
         {"title": "[SubsPlease] Tensei Shitara Slime Datta Ken S4 - 06 (1080p) [CCCC].mkv", "seeders": 400, "url": "u4"},
     ]
     ranked = rank(results, SLIME[3], 6)
-    # non-preferred group excluded; sub-1080p excluded; seeders break the resolution tie
-    assert [r["url"] for _, r in ranked] == ["u4", "u3"]
+    # sub-1080p excluded; preferred group first, seeders break the resolution tie;
+    # a non-preferred group is kept but ranked last (it is the only option for a
+    # show the preferred group does not carry -- see rank()'s docstring)
+    assert [r["url"] for _, r in ranked] == ["u4", "u3", "u1"]
 
 
 def test_jellyfin_path_translation():
@@ -896,3 +901,54 @@ def test_seadex_does_not_regrab_the_same_release():
         assert len(q.added) == 1
 
     asyncio.run(main())
+
+
+def _sbr(anilist_id, title, episodes, offset):
+    return {
+        "anilist_id": anilist_id, "title": title, "format": "ONA",
+        "episodes": episodes, "aired": episodes, "episode_offset": offset,
+        "franchise_offset": 177, "preferred_group": "SubsPlease",
+        "synonyms": [title], "show_title": "JoJo's Bizarre Adventure (TV)",
+    }
+
+
+# AniList splits Steel Ball Run into "1st STAGE" (1 ep) and "2nd & 3rd STAGE"
+# (11 eps); nyaa numbers straight through and never writes the stage marker.
+SBR_1ST = _sbr(190327, "JoJo no Kimyou na Bouken: Steel Ball Run - 1st STAGE", 1, 0)
+SBR_2ND = _sbr(210482, "JoJo no Kimyou na Bouken: Steel Ball Run - 2nd & 3rd STAGE", 11, 1)
+
+
+@pytest.mark.parametrize(
+    "release_no,want_id,want_ep",
+    [(1, 190327, 1), (2, 210482, 1), (5, 210482, 4), (12, 210482, 11)],
+)
+def test_stage_split_release_routes_to_the_right_arc(release_no, want_id, want_ep):
+    name = f"[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - {release_no:02d} [1080p NF WEB-DL]"
+    hit = match.match(match.parse(name), [SBR_1ST, SBR_2ND])
+    assert hit is not None, "stage-qualified AniList title must match a stage-less release"
+    assert (hit[0]["anilist_id"], hit[1]) == (want_id, want_ep)
+
+
+def test_non_preferred_group_is_ranked_not_dropped():
+    """SubsPlease never released Steel Ball Run; before this, rank() dropped
+    every other group and backfill reported 'nothing found' forever."""
+    results = [
+        {"title": "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 05 [1080p NF WEB-DL]",
+         "seeders": 864, "url": "magnet:?erai"},
+        {"title": "[DKB] Steel Ball Run: JoJo no Kimyou na Bouken - 05 [720p][HEVC]",
+         "seeders": 95, "url": "magnet:?dkb"},
+    ]
+    ranked = backfill.rank(results, SBR_2ND, 4)
+    assert [r[1]["url"] for r in ranked] == ["magnet:?erai"], "720p is below the floor"
+
+
+def test_preferred_group_still_wins_when_it_exists():
+    series = {**SBR_2ND, "preferred_group": "Erai-raws"}
+    results = [
+        {"title": "[Other] JoJo no Kimyou na Bouken: Steel Ball Run - 05 [1080p]",
+         "seeders": 9999, "url": "magnet:?other"},
+        {"title": "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 05 [1080p]",
+         "seeders": 1, "url": "magnet:?erai"},
+    ]
+    ranked = backfill.rank(results, series, 4)
+    assert ranked[0][1]["url"] == "magnet:?erai", "preferred group outranks a higher-seeded stranger"

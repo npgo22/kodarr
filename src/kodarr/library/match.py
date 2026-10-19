@@ -63,6 +63,14 @@ _SEASON_RE = re.compile(r"\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b|\bseason\s+(\d+)
 # the group's release-name still matches. Runs on normalize()d (lowercase) input.
 _SEASON_SUFFIX_RE = re.compile(r"\s+(?:ii|iii|iv|s\d+|\d+(?:st|nd|rd|th))$")
 
+# AniList splits some ONAs into arcs named "<Base> - 1st STAGE" / "- 2nd & 3rd
+# STAGE" (Steel Ball Run). No group writes that: nyaa only ever has "JoJo no
+# Kimyou na Bouken: Steel Ball Run - 05", so the full title matched nothing and
+# every episode came back "nothing found". Strip the trailing stage marker so
+# both arcs reduce to the shared base; episode_offset is what then decides
+# which arc a given release number belongs to.
+_STAGE_SUFFIX_RE = re.compile(r"\s+(?:\d+(?:st|nd|rd|th)\s+)+stage$")
+
 
 def normalize(title: str) -> str:
     """Lowercase, drop punctuation, collapse whitespace — for title comparison."""
@@ -76,6 +84,7 @@ def _strip_season(name: str) -> str:
     reduce to the base for search."""
     name = _SEASON_RE.sub("", name)
     name = _SEASON_SUFFIX_RE.sub("", name)
+    name = _STAGE_SUFFIX_RE.sub("", name)
     return " ".join(name.split())
 
 
