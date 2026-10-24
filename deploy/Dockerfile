@@ -9,7 +9,7 @@ RUN uv sync --frozen --no-install-project --no-dev
 COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
-FROM python:3.14-slim-bookworm
+FROM python:3.15-slim-bookworm
 COPY --from=build /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH" KODARR_CONFIG=/config/config.toml
 # boot smoke test: a broken venv/interpreter pairing fails the build, not prod
