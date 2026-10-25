@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -28,6 +29,21 @@ from kodarr.config import Config
 from kodarr.metadata.tmdb import Tmdb
 
 log = logging.getLogger(__name__)
+
+
+def _fskey(name: str) -> str:
+    """Name reduced to what survives qbittorrent's filename sanitising.
+
+    qbit rewrites characters it cannot put on disk, so the announced
+    "JoJo no Kimyou na Bouken: Steel Ball Run - 06" is stored as
+    "JoJo no Kimyou na Bouken - Steel Ball Run - 06" and neither name is a
+    prefix of the other. Announce grabs carry no infohash (autobrr sends a
+    .torrent URL, not a magnet), so this prefix match is their only route
+    home -- before this, every colon-titled show grabbed from an announce sat
+    'queued' until it expired three days later. Comparing only alphanumerics
+    sidesteps the substitution table instead of reimplementing it.
+    """
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 DAY = 86400
 
@@ -90,11 +106,12 @@ class Daemon:
         if qbit_grabs:
             by_hash = {g["client_id"]: g for g in qbit_grabs if g["client_id"]}
             for t in await self.qbit.completed():
+                name = _fskey(t["name"])
                 g = by_hash.get(t["hash"]) or next(
                     # display names and indexer titles differ by suffixes; prefix-match both ways
                     (g for g in qbit_grabs
-                     if t["name"].startswith(g["release_name"].removesuffix(".mkv"))
-                     or g["release_name"].startswith(t["name"])),
+                     if name.startswith(_fskey(g["release_name"].removesuffix(".mkv")))
+                     or _fskey(g["release_name"]).startswith(name)),
                     None,
                 )
                 if g:

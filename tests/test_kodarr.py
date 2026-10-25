@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from kodarr import daemon
 from kodarr.acquire import backfill
 from kodarr.library import match
 from kodarr.library import organize
@@ -952,3 +953,18 @@ def test_preferred_group_still_wins_when_it_exists():
     ]
     ranked = backfill.rank(results, series, 4)
     assert ranked[0][1]["url"] == "magnet:?erai", "preferred group outranks a higher-seeded stranger"
+
+
+def test_qbit_sanitised_name_still_matches_its_grab():
+    """qbit stores ':' as ' -', so SBR ep 6 (an autobrr grab, no infohash) was
+    unmatchable by name and sat 'queued' until it expired."""
+    announced = "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 06 [1080p NF WEB-DL AVC AAC][MultiSub][95DE4991]"
+    on_disk = "[Erai-raws] JoJo no Kimyou na Bouken - Steel Ball Run - 06 [1080p NF WEB-DL AVC AAC][MultiSub][95DE4991].mkv"
+    assert not on_disk.startswith(announced)  # why the old prefix match failed
+    assert daemon._fskey(on_disk).startswith(daemon._fskey(announced))
+
+
+def test_fskey_does_not_match_a_different_episode():
+    a = "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 06 [1080p][95DE4991]"
+    b = "[Erai-raws] JoJo no Kimyou na Bouken - Steel Ball Run - 07 [1080p][AAAAAAAA].mkv"
+    assert not daemon._fskey(b).startswith(daemon._fskey(a))
