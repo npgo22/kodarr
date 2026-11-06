@@ -121,6 +121,42 @@ class Daemon:
             by_hash = {g["client_id"]: g for g in remaining if g["client_id"] and len(g["client_id"]) == 40}
             for t in await self.qbit.by_hashes(list(by_hash)):
                 await self._finish(by_hash[t["hash"]], Path(t["path"]))
+        await self._fail_grabs_that_never_arrived()
+
+    async def _fail_grabs_that_never_arrived(self) -> None:
+        """Fail hashless grabs whose torrent never reached the client.
+
+        qbit's /torrents/add answers "Ok." and only *then* fetches a .torrent
+        URL, so a failed fetch is invisible to us. nyaa publishes the file a few
+        seconds after the IRC announce autobrr reads, so an announce grab can
+        lose the race and get a 404 -- which is what happened to Steel Ball Run
+        ep 08: qbit logged "Failed to add torrent ... (404)" and the grab sat
+        'queued' with nothing to match it anywhere. expire_stale_grabs only
+        notices after three days, and until then active_grab blocks the retry,
+        so the episode was simply missing.
+
+        Failing it here instead hands the episode back to the search path, which
+        grabs magnets and so carries an infohash. Cause-agnostic on purpose: a
+        dead URL, a rejected torrent and a 404 all look the same from here.
+
+        shortcut: only sees our own category, so a grab that some other tool
+        added outside it looks absent and gets failed. Harmless -- the import
+        then comes via by_hashes - but widen the lookup if hashless grabs ever
+        start arriving under a foreign category.
+        """
+        stale = await db.grabs_awaiting_client(self.conn)
+        if not stale:
+            return
+        present = [_fskey(n) for n in await self.qbit.all_names()]
+        for g in stale:
+            key = _fskey(g["release_name"].removesuffix(".mkv"))
+            if any(n.startswith(key) or key.startswith(n) for n in present):
+                continue
+            log.warning(
+                "grab never reached the client",
+                extra={"event": "download_failed", "release": g["release_name"]},
+            )
+            await db.set_grab_status(self.conn, g["id"], "failed")
     async def _finish(self, g: dict, path: Path) -> None:
         # one broken import must not starve the rest of the watch pass;
         # failures retry on later passes (grabs are retryable, qbit dedupes)

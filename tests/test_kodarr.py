@@ -1,5 +1,6 @@
 """The two paths that silently corrupt a library if wrong: matching and layout."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -968,3 +969,72 @@ def test_fskey_does_not_match_a_different_episode():
     a = "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 06 [1080p][95DE4991]"
     b = "[Erai-raws] JoJo no Kimyou na Bouken - Steel Ball Run - 07 [1080p][AAAAAAAA].mkv"
     assert not daemon._fskey(b).startswith(daemon._fskey(a))
+
+
+class _FakeQbitNames:
+    def __init__(self, names):
+        self._names = names
+
+    async def all_names(self):
+        return list(self._names)
+
+
+class _FakeGrabDB:
+    """Stands in for the two db calls _fail_grabs_that_never_arrived makes."""
+
+    def __init__(self, stale):
+        self.stale, self.failed = stale, []
+
+    async def grabs_awaiting_client(self, _conn):
+        return self.stale
+
+    async def set_grab_status(self, _conn, grab_id, status):
+        self.failed.append((grab_id, status))
+
+
+def _run_never_arrived(monkeypatch, stale, names):
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.conn = object()
+    d.qbit = _FakeQbitNames(names)
+    fake = _FakeGrabDB(stale)
+    monkeypatch.setattr(daemon.db, "grabs_awaiting_client", fake.grabs_awaiting_client)
+    monkeypatch.setattr(daemon.db, "set_grab_status", fake.set_grab_status)
+    asyncio.run(d._fail_grabs_that_never_arrived())
+    return fake.failed
+
+
+# the real incident: nyaa 404'd the .torrent the announce pointed at, so qbit
+# answered "Ok." to /torrents/add and then added nothing at all
+SBR08 = "[Erai-raws] JoJo no Kimyou na Bouken: Steel Ball Run - 08 [1080p NF WEB-DL AVC AAC][MultiSub][30B34E79]"
+
+
+def test_grab_whose_torrent_never_arrived_is_failed(monkeypatch):
+    failed = _run_never_arrived(
+        monkeypatch,
+        [{"id": 769, "release_name": SBR08}],
+        ["[SubsPlease] Toaru Anbu no Item - 05 (1080p) [FE537959].mkv"],
+    )
+    assert failed == [(769, "failed")]
+
+
+def test_grab_present_under_qbits_rewritten_name_is_left_alone(monkeypatch):
+    """The torrent IS there, just stored with ':' rewritten to ' -' -- failing it
+    would abandon a download already in progress."""
+    on_disk = "[Erai-raws] JoJo no Kimyou na Bouken - Steel Ball Run - 08 [1080p NF WEB-DL AVC AAC][MultiSub][30B34E79]"
+    failed = _run_never_arrived(monkeypatch, [{"id": 771, "release_name": SBR08}], [on_disk])
+    assert failed == []
+
+
+def test_never_arrived_check_is_skipped_when_nothing_is_stale(monkeypatch):
+    class Boom:
+        async def all_names(self):
+            raise AssertionError("must not ask qbit when there is nothing to check")
+
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.conn, d.qbit = object(), Boom()
+    monkeypatch.setattr(daemon.db, "grabs_awaiting_client", lambda _c: _empty())
+    asyncio.run(d._fail_grabs_that_never_arrived())
+
+
+async def _empty():
+    return []

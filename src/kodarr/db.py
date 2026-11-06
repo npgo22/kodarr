@@ -157,6 +157,21 @@ async def expire_stale_grabs(conn: AsyncConnection, days: int = 3) -> list[dict]
     return await cur.fetchall()
 
 
+async def grabs_awaiting_client(conn: AsyncConnection, minutes: int = 10) -> list[dict]:
+    """Hashless in-flight grabs old enough that the client should hold the torrent by now.
+
+    Only the hashless ones: a grab with an infohash came from a magnet, which
+    qbit resolves itself, while a .torrent URL is fetched asynchronously and can
+    fail long after /torrents/add has already answered "Ok.".
+    """
+    cur = await conn.execute(
+        """SELECT * FROM grabs WHERE status = 'queued' AND client_id IS NULL
+           AND created_at < now() - make_interval(mins => %s)""",
+        (minutes,),
+    )
+    return await cur.fetchall()
+
+
 async def searched_recently(conn: AsyncConnection, anilist_id: int, days: int = 7) -> bool:
     cur = await conn.execute(
         "SELECT 1 FROM series WHERE anilist_id = %s AND last_search > now() - make_interval(days => %s)",

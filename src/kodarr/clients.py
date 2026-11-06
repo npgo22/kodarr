@@ -52,6 +52,16 @@ class Qbit:
             if t["state"] in _QBIT_DONE or t["progress"] == 1
         ]
 
+    async def all_names(self) -> list[str]:
+        """Every torrent name in our category, whatever its state.
+
+        `completed()` cannot answer "is this release in the client at all?" --
+        a torrent still downloading is absent from it, and so is one that was
+        never added.
+        """
+        r = await self._post("/api/v2/torrents/info", {"category": self.category})
+        return [t["name"] for t in r.json()]
+
     async def completed(self) -> list[dict[str, Any]]:
         """[{hash, name, content_path}] for finished torrents in our category."""
         r = await self._post("/api/v2/torrents/info", {"category": self.category})
