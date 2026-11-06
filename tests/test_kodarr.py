@@ -1038,3 +1038,50 @@ def test_never_arrived_check_is_skipped_when_nothing_is_stale(monkeypatch):
 
 async def _empty():
     return []
+
+
+class _FinishDB:
+    """Captures what _finish decides about a grab."""
+
+    def __init__(self):
+        self.statuses = []
+
+    async def get_series(self, _conn, _aid):
+        return {"anilist_id": 210482, "title": "SBR"}
+
+    async def set_grab_status(self, _conn, grab_id, status):
+        self.statuses.append((grab_id, status))
+
+
+def _run_finish(monkeypatch, tmp_path, imported, exists):
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.conn = d.jellyfin = d.http = d.tmdb = d.gotify = None
+    fake = _FinishDB()
+    monkeypatch.setattr(daemon.db, "get_series", fake.get_series)
+    monkeypatch.setattr(daemon.db, "set_grab_status", fake.set_grab_status)
+
+    async def fake_import(*_a, **_k):
+        return imported
+
+    monkeypatch.setattr(daemon.importer, "import_path", fake_import)
+    path = tmp_path / "ep.mkv"
+    if exists:
+        path.write_bytes(b"x")
+    asyncio.run(d._finish({"id": 771, "anilist_id": 210482, "release_name": SBR08, "source": "autobrr"}, path))
+    return fake.statuses
+
+
+def test_empty_import_with_no_file_yet_stays_queued(monkeypatch, tmp_path):
+    """qbit reports the post-move path in the same second it finishes moving, so
+    a watch tick can land on a path with nothing behind it. Failing the grab
+    there loses the episode for good -- only in-flight grabs get retried."""
+    assert _run_finish(monkeypatch, tmp_path, imported=0, exists=False) == []
+
+
+def test_empty_import_with_the_file_present_is_failed(monkeypatch, tmp_path):
+    """Content is there and still unimportable: genuinely dead, stop retrying."""
+    assert _run_finish(monkeypatch, tmp_path, imported=0, exists=True) == [(771, "failed")]
+
+
+def test_successful_import_is_marked_imported(monkeypatch, tmp_path):
+    assert _run_finish(monkeypatch, tmp_path, imported=1, exists=True) == [(771, "imported")]

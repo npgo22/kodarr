@@ -170,7 +170,28 @@ class Daemon:
         except Exception:
             log.exception("import failed", extra={"event": "error", "release": g["release_name"]})
             n = 0
-        await db.set_grab_status(self.conn, g["id"], "imported" if n else "failed")
+        if n:
+            await db.set_grab_status(self.conn, g["id"], "imported")
+        elif path.exists():
+            # Content is on disk and still nothing imported: an unparseable name
+            # or no video files. Genuinely dead, so stop retrying it.
+            await db.set_grab_status(self.conn, g["id"], "failed")
+        else:
+            # qbit starts reporting the post-move content_path in the same second
+            # it finishes moving the file out of /data/torrents/incomplete, so a
+            # watch tick landing on that second sees a path with nothing behind
+            # it. import_path then returns 0 and the old code marked the grab
+            # 'failed' -- permanently, because only in-flight grabs are ever
+            # retried. Steel Ball Run ep 08 finished at 21:24:39 and was failed
+            # at 21:24:39 with the file sitting there complete.
+            #
+            # Leaving it queued is what the comment above always promised: the
+            # next pass retries 30s later, and expire_stale_grabs is still the
+            # three-day backstop.
+            log.warning(
+                "content not on disk yet, leaving grab queued",
+                extra={"event": "import_retry", "release": g["release_name"], "path": str(path)},
+            )
 
     async def metadata_pass(self) -> None:
         airing = [s for s in await db.monitored_series(self.conn) if s["status"] != "FINISHED"]
